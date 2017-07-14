@@ -357,7 +357,7 @@ class ClusterWork:
                                                                         names=['r', 'i']),
                                        columns=flat_it_result.keys(), dtype=float)
 
-            results.iloc[[it]] = flat_it_result
+            results.iloc[it] = flat_it_result
 
             # write first line with header
             if it == 0:
