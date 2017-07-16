@@ -1,4 +1,5 @@
 import argparse
+import pandas as pd
 
 
 def convert_hostfile():
@@ -33,3 +34,10 @@ def convert_hostfile():
         print("    ", line)
         args.outfile.write(line + "\n")
     args.outfile.close()
+
+
+def load_results(path):
+    results = pd.read_csv(path, sep='\t')
+    results.set_index(keys=['r', 'i'], inplace=True)
+
+    return results

@@ -208,6 +208,7 @@ class ClusterWork:
 
             if not hasattr(store, 'index'):
                 store.index = pd.MultiIndex.from_product([range(config['repetitions']), range(config['iterations'])])
+                store.index.set_names(['r', 'i'], inplace=True)
                 store.config = config
                 # create work list
                 work_list = [job_stream.inline.Args(cls(), config, i) for i in range(config['repetitions'])]
