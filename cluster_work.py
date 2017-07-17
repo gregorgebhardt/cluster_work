@@ -310,18 +310,13 @@ class ClusterWork:
                 cls.__setup_work_flow(w)
                 print('[rank {}] Work has been setup...'.format(job_stream.getRank()))
 
-                # w.run()
+        # if we don't run the experiment on the cluster, we run it locally
         else:
-            # TODO needs to be implemented
-            # if -b, -B or -p option is set, only show information, don't
-            # start the experiments
-            # if self.options.browse or self.options.browse_big or self.options.progress:
-            #     self.browse()
-            #     raise SystemExit
-
-            # TODO add multiprocessing here
-            config_experiments_w_expanded_params = cls.__init_experiments()
+            # TODO add multiprocessing here?
+            config_experiments_w_expanded_params = cls.__init_experiments(options.config, options.experiments,
+                                                                          options.delete, options.skip_ignore_config)
             for experiment in config_experiments_w_expanded_params:
+                # create an instance of this class for running the experiment
                 instance = cls()
 
                 # expand config_list_w_expanded_params for all repetitions and add self and rep number
@@ -331,11 +326,13 @@ class ClusterWork:
                                             [experiment] * num_repetitions,
                                             range(num_repetitions)))
 
+                # run each repetition sequentially
                 results = dict()
                 for repetition in repetitions_list:
                     result = ClusterWork.__run_rep(*repetition)
                     results[repetition[2]] = result
 
+                # write the results into a DataFrame and dump that frame into a csv
                 _index = pd.MultiIndex.from_product([range(experiment['repetitions']),
                                                      range(experiment['iterations'])],
                                                     names=['r', 'i'])
@@ -406,6 +403,7 @@ class ClusterWork:
                 print('Repetition {} of experiment {} has finished before. Skipping...'.format(rep, config['name']))
             return results
 
+        # reset state in subclass
         self.reset(config, rep)
 
         # if not completed but some iterations have finished, check for restart capabilities
@@ -414,25 +412,36 @@ class ClusterWork:
                 print('Repetition {} of experiment {} has started before. Restarting at {}.'.format(rep,
                                                                                                     config['name'],
                                                                                                     n_finished_reps))
+            # set start for iterations and restore state in subclass
             start_iteration = n_finished_reps
             self.restore_state(config, rep, start_iteration)
+
+            # index needs to be reset since only the finished iterations are in the log file.
+            results = results.reindex(index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
+                                                                       names=['r', 'i']))
         else:
+            # if restart is not supported we need to restart from the first iteration with an empty results frame
             start_iteration = 0
             results = None
 
         for it in range(start_iteration, config['iterations']):
+            # run iteration and get results
             it_result = self.iterate(config, rep, it)
+            # we need to flatten the results if there are any nested lists or dicts
             flat_it_result = flatten_dict(it_result)
 
             if results is None:
+                # create results DataFrame after first iteration
                 results = pd.DataFrame(index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
                                                                         names=['r', 'i']),
                                        columns=flat_it_result.keys(), dtype=float)
 
+            # add results to data frame
             results.loc[(rep, it)] = flat_it_result
 
-            # write first line with header
+            # write results to log file
             if it == 0:
+                # write first line with header
                 results.iloc[[it]].to_csv(log_filename, mode='w', header=True, **self._pandas_to_csv_options)
             else:
                 results.iloc[[it]].to_csv(log_filename, mode='a', header=False, **self._pandas_to_csv_options)
