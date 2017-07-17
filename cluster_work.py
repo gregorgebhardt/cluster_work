@@ -239,9 +239,8 @@ class ClusterWork:
             :param r: the repetition number
             """
             if cls._VERBOSE:
-                print("[rank {}] In function '_run_repetition'\n".format(job_stream.inline.getRank()),
-                      "[rank {}] cpuCount: {}\n".format(job_stream.inline.getRank(), job_stream.inline.getCpuCount()),
-                      "[rank {}] hostname: {}\n".format(job_stream.inline.getRank(), socket.gethostname()))
+                print("[rank {}] In function '_run_repetition' on host {}".format(job_stream.inline.getRank(),
+                                                                                  socket.gethostname()))
 
             repetition_results = suite.__run_rep(exp_config, r)
 
@@ -334,12 +333,18 @@ class ClusterWork:
 
         # skip repetition if it has finished
         if repetition_has_finished:
+            if self._VERBOSE:
+                print('Repetition {} of experiment {} has finished before. Skipping...'.format(rep, config['name']))
             return results
 
         self.reset(config, rep)
 
         # if not completed but some iterations have finished, check for restart capabilities
-        if self._restore_supported:
+        if self._restore_supported and n_finished_reps > 0:
+            if self._VERBOSE:
+                print('Repetition {} of experiment {} has started before. Restarting at {}.'.format(rep,
+                                                                                                    config['name'],
+                                                                                                    n_finished_reps))
             start_iteration = n_finished_reps
             self.restore_state(config, rep, start_iteration)
         else:
@@ -474,9 +479,9 @@ class ClusterWork:
     def __repetition_has_completed(config, rep) -> (bool, int, pd.DataFrame):
         log_df = ClusterWork.__load_repetition_results(config, rep)
 
-        if log_df:
+        if log_df is not None:
             # if repetition has completed
-            return log_df.nrows == config['iterations'], log_df.nrows, log_df
+            return log_df.shape[0] == config['iterations'], log_df.shape[0], log_df
 
         return False, 0, None
 
