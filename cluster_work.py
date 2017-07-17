@@ -114,6 +114,8 @@ class ClusterWork:
     _parser.add_argument('-d', '--delete', action='store_true')
     _parser.add_argument('-e', '--experiments', nargs='+')
     _parser.add_argument('-v', '--verbose', action='store_true')
+    _parser.add_argument('--no_compare_configs', action='store_true')
+    _parser.add_argument('--restart_full_repetitions', action='store_true')
 
     @classmethod
     def _init_experiments(cls, config_default, config_experiments, options):
@@ -167,15 +169,27 @@ class ClusterWork:
 
         config_experiments_w_expanded_params = cls.__expand_param_list(config_experiments)
 
-        # TODO check for existing results and skip experiments
-
         # create directories, write config files
-        for config in config_experiments_w_expanded_params:
+        for _config in config_experiments_w_expanded_params:
             effective_params = dict()
             deep_update(effective_params, cls._default_params)
-            deep_update(effective_params, config['params'])
-            config['params'] = effective_params
-            cls.__create_experiment_directory(config, options.delete)
+            deep_update(effective_params, _config['params'])
+            _config['params'] = effective_params
+            cls.__create_experiment_directory(_config, options.delete)
+
+        # check for existing results and skip experiment
+        if not options.delete:
+            for _config in config_experiments_w_expanded_params:
+                # check if experiment exists and has finished
+                if cls.__experiment_has_finished(_config):
+                    if options.no_compare_config:
+                        # remove experiment from list
+                        config_experiments_w_expanded_params.remove(_config)
+                    else:
+                        # check if experiment configs are identical
+                        if cls.__experiments_exists_identically(_config):
+                            # remove experiment from list
+                            config_experiments_w_expanded_params.remove(_config)
 
         return config_experiments_w_expanded_params
 
@@ -311,45 +325,28 @@ class ClusterWork:
                 with open(os.path.join(experiment['path'], 'results.csv'), 'w') as results_file:
                     result_frame.to_csv(results_file, **cls._pandas_to_csv_options)
 
-    def __run_rep(self, config, rep):
+    def __run_rep(self, config, rep) -> pd.DataFrame:
         """ run a single repetition including directory creation, log files, etc. """
-
-        # create pandas object for storing results
-        results: pd.DataFrame = None
-
         log_filename = os.path.join(config['log_path'], 'rep_{}.csv'.format(rep))
 
-        # TODO add restore functionality
-        # # check if repetition exists and has been completed
-        # restore = 0
-        # if os.path.exists(logname):
-        #     logfile = open(logname, 'r')
-        #     lines = logfile.readlines()
-        #     logfile.close()
-        #
-        #     # if completed, continue loop
-        #     if 'iterations' in config and len(lines) == config['iterations']:
-        #         return False
-        #     # if not completed, check if restore_state is supported
-        #     if not self.restore_supported:
-        #         # not supported, delete repetition and start over
-        #         # print 'restore not supported, deleting %s' % logname
-        #         os.remove(logname)
-        #         restore = 0
-        #     else:
-        #         restore = len(lines)
-        #
-        # self.reset(config, rep)
-        #
-        # if restore:
-        #     logfile = open(logname, 'a')
-        #     self.restore_state(config, rep, restore)
-        # else:
-        #     logfile = open(logname, 'w')
+        # check if log-file for repetition exists
+        repetition_has_finished, n_finished_reps, results = self.__repetition_has_completed(config, rep)
+
+        # skip repetition if it has finished
+        if repetition_has_finished:
+            return results
 
         self.reset(config, rep)
 
-        for it in range(config['iterations']):
+        # if not completed but some iterations have finished, check for restart capabilities
+        if self._restore_supported:
+            start_iteration = n_finished_reps
+            self.restore_state(config, rep, start_iteration)
+        else:
+            start_iteration = 0
+            results = None
+
+        for it in range(start_iteration, config['iterations']):
             it_result = self.iterate(config, rep, it)
             flat_it_result = flatten_dict(it_result)
 
@@ -443,6 +440,46 @@ class ClusterWork:
         """
         with open(os.path.join(config['path'], 'experiment.yml'), 'w') as f:
             yaml.dump(config, f, default_flow_style=False)
+
+    @staticmethod
+    def __experiment_exists(config):
+        return os.path.exists(os.path.join(config['path'], 'experiment.yml'))
+
+    @staticmethod
+    def __experiments_exists_identically(config):
+        if ClusterWork.__experiment_exists(config):
+            with open(os.path.join(config['path'], 'experiment.yml'), 'r') as f:
+                dumped_config = yaml.load(f)
+                return dumped_config == config
+
+        return False
+
+    @staticmethod
+    def __experiment_has_finished(config):
+        return os.path.exists(os.path.join(config['path'], 'results.csv'))
+
+    @staticmethod
+    def __load_repetition_results(config, rep):
+        log_filename = os.path.join(config['log_path'], 'rep_{}.csv'.format(rep))
+
+        if os.path.exists(log_filename):
+            log_df = pd.read_csv(log_filename, sep='\t')
+            log_df.set_index(keys=['r', 'i'], inplace=True)
+
+            return log_df
+
+        return None
+
+    @staticmethod
+    def __repetition_has_completed(config, rep) -> (bool, int, pd.DataFrame):
+        log_df = ClusterWork.__load_repetition_results(config, rep)
+
+        if log_df:
+            # if repetition has completed
+            return log_df.nrows == config['iterations'], log_df.nrows, log_df
+
+        return False, 0, None
+
 
     @abc.abstractmethod
     def reset(self, config: dict, rep: int) -> None:
