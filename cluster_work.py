@@ -18,9 +18,10 @@ import os
 import re
 import socket
 import abc
+import time
 from copy import deepcopy
 
-import job_stream.inline
+import job_stream.inline, job_stream.common
 import pandas as pd
 import yaml
 
@@ -36,19 +37,6 @@ def deep_update(d, u):
         else:
             d[k] = u[k]
     return d
-
-
-def progress(config, rep):
-    """ Helper function to calculate the progress made on one experiment. """
-    fullpath = os.path.join(config['path'], config['name'])
-    logname = os.path.join(fullpath, '%i.log' % rep)
-    if os.path.exists(logname):
-        logfile = open(logname, 'r')
-        lines = logfile.readlines()
-        logfile.close()
-        return int(100 * len(lines) / config['iterations'])
-    else:
-        return 0
 
 
 def flatten_dict(d, parent_key='', sep='_'):
@@ -114,7 +102,8 @@ class ClusterWork:
     _parser.add_argument('-d', '--delete', action='store_true')
     _parser.add_argument('-e', '--experiments', nargs='+')
     _parser.add_argument('-v', '--verbose', action='store_true')
-    _parser.add_argument('--no_compare_configs', action='store_true')
+    _parser.add_argument('-p', '--progress', action='store_true')
+    _parser.add_argument('--skip_ignore_config', action='store_true')
     _parser.add_argument('--restart_full_repetitions', action='store_true')
 
     @classmethod
@@ -124,74 +113,94 @@ class ClusterWork:
         :param config_default: the default configuration document
         :param config_experiments: the documents of the experiment configurations
         :param options: the options read by the argument parser
-        :return: has to return the default configuration and the configuration of the experiments.
         """
-        return config_default, config_experiments
+        pass
 
     @classmethod
-    def __init_experiments(cls):
+    def __load_experiments(cls, config_file, experiment_selectors=None):
+        """loads all experiment configurations from the given file, merges them with the default configuration and
+        expands list or grid parameters
+
+        :config_file: path to the configuration yaml for the experiments that should be loaded.
+        :experiment_selectors: list of experiment names. Only the experiments with a name in this list will be loaded.
+        :return: returns the experiment configurations
+        """
+        try:
+            _config_documents = [*yaml.load_all(config_file)]
+        except IOError:
+            raise SystemExit('config file %s not found.' % config_file)
+
+        if _config_documents[0]['name'].lower() == 'DEFAULT'.lower():
+            default_config = _config_documents[0]
+            experiments_config = _config_documents[1:]
+        else:
+            default_config = dict()
+            experiments_config = _config_documents
+
+        # iterate over experiments and compute effective configuration and parameters
+        effective_experiments = []
+        for _config_e in experiments_config:
+            if not experiment_selectors or _config_e['name'] in experiment_selectors:
+                # merge config with default config from yaml file
+                _effective_config = deepcopy(default_config)
+                deep_update(_effective_config, _config_e)
+
+                # merge params with default params from subclass
+                _effective_params = dict()
+                deep_update(_effective_params, cls._default_params)
+                deep_update(_effective_params, _effective_config['params'])
+                _effective_config['params'] = _effective_params
+
+                effective_experiments.append(_effective_config)
+
+                # check for all required param keys
+                required_keys = ['name', 'path', 'repetitions', 'iterations']
+                missing_keys = [key for key in required_keys if key not in _effective_config]
+                if missing_keys:
+                    raise IncompleteConfigurationError(
+                        'config does not contain all required keys: {}'.format(missing_keys))
+
+        expanded_experiments = cls.__expand_param_list(effective_experiments)
+
+        return expanded_experiments
+
+    @classmethod
+    def __init_experiments(cls, config_file, experiments=None, delete_old=False, ignore_config_for_skip=False):
         """initializes the experiment by loading the configuration file and creating the directory structure.
         :return:
         """
-        options = cls._parser.parse_args()
+        # options = cls._parser.parse_args()
 
-        try:
-            _config_documents = [*yaml.load_all(options.config)]
-        except IOError:
-            raise SystemExit('config file %s not found.' % options.config)
+        expanded_experiments = cls.__load_experiments(config_file, experiments)
 
-        if _config_documents[0]['name'].lower() == 'DEFAULT'.lower():
-            config_default = _config_documents[0]
-            config_experiments = _config_documents[1:]
-        else:
-            config_default = dict()
-            config_experiments = _config_documents
-
-        # allow subclasses to modify the configurations
-        config_default, config_experiments = cls._init_experiments(config_default, config_experiments, options)
-
-        # iterate over experiments and merge with default configuration
-        _config_experiments_tmp = []
-        for _config_e in config_experiments:
-            if not options.experiments or _config_e['name'] in options.experiments:
-                _config = deepcopy(config_default)
-                deep_update(_config, _config_e)
-                _config_experiments_tmp.append(_config)
-
-                # check for all required param keys
-                missing_keys = [key for key in ['name', 'path', 'repetitions', 'iterations'] if key not in _config]
-                if missing_keys:
-                    raise IncompleteConfigurationError(
-                        'config does not contian all required keys: {}'.format(missing_keys))
-
-        config_experiments = _config_experiments_tmp
-        del _config_experiments_tmp
-
-        config_experiments_w_expanded_params = cls.__expand_param_list(config_experiments)
-
-        # create directories, write config files
-        for _config in config_experiments_w_expanded_params:
-            effective_params = dict()
-            deep_update(effective_params, cls._default_params)
-            deep_update(effective_params, _config['params'])
-            _config['params'] = effective_params
-            cls.__create_experiment_directory(_config, options.delete)
-
-        # check for existing results and skip experiment
-        if not options.delete:
-            for _config in config_experiments_w_expanded_params:
+        # check for finished experiments
+        skip_experiments = []
+        for _config in expanded_experiments:
+            if not delete_old:
                 # check if experiment exists and has finished
                 if cls.__experiment_has_finished(_config):
-                    if options.no_compare_config:
+                    if ignore_config_for_skip:
                         # remove experiment from list
-                        config_experiments_w_expanded_params.remove(_config)
+                        skip_experiments.append(_config)
+                        # expanded_experiments.remove(_config)
+                        print('Experiment {} has finished before. Skipping...'.format(_config['name']))
                     else:
                         # check if experiment configs are identical
                         if cls.__experiments_exists_identically(_config):
                             # remove experiment from list
-                            config_experiments_w_expanded_params.remove(_config)
+                            skip_experiments.append(_config)
+                            # expanded_experiments.remove(_config)
+                            print('Experiment {} has identically finished before. Skipping...'.format(_config['name']))
 
-        return config_experiments_w_expanded_params
+        run_experiments = [_config for _config in expanded_experiments if _config not in skip_experiments]
+
+        if not run_experiments:
+            SystemExit('No work to do...')
+
+        for _config in run_experiments:
+            cls.__create_experiment_directory(_config, delete_old)
+
+        return run_experiments
 
     @classmethod
     def __setup_work_flow(cls, w: job_stream.inline.Work):
@@ -207,7 +216,10 @@ class ClusterWork:
             if cls._VERBOSE:
                 print("[rank {}] In function '_work_init'".format(job_stream.inline.getRank()))
 
-            work_list = cls.__init_experiments()
+            options = cls._parser.parse_args()
+            work_list = cls.__init_experiments(config_file=options.config, experiments=options.experiments,
+                                               delete_old=options.delete,
+                                               ignore_config_for_skip=options.skip_ignore_config)
             return job_stream.inline.Multiple(work_list)
 
         @w.frame
@@ -218,7 +230,11 @@ class ClusterWork:
             :param config: the configuration document for the experiment
             """
             if cls._VERBOSE:
-                print("[rank {}] In function '_start_experiment'".format(job_stream.inline.getRank()))
+                print("[rank {}] In function '_start_experiment' of {}".format(job_stream.inline.getRank(),
+                                                                               config['name']))
+                print("[rank {}] cpuCount: {}, hostCpuCount: {}".format(job_stream.common.getRank(),
+                                                                        job_stream.common.getCpuCount(),
+                                                                        job_stream.common.getHostCpuCount()))
 
             if not hasattr(store, 'index'):
                 store.index = pd.MultiIndex.from_product([range(config['repetitions']), range(config['iterations'])])
@@ -239,7 +255,7 @@ class ClusterWork:
             :param r: the repetition number
             """
             if cls._VERBOSE:
-                print("[rank {}] In function '_run_repetition' on host {}".format(job_stream.inline.getRank(),
+                print("[rank {}] In function '_run_repetition' on host {}".format(job_stream.common.getRank(),
                                                                                   socket.gethostname()))
 
             repetition_results = suite.__run_rep(exp_config, r)
@@ -278,10 +294,15 @@ class ClusterWork:
     def run(cls):
         """ starts the experiments as given in the config file. """
         options = cls._parser.parse_args()
+
         cls._VERBOSE = options.verbose
         if cls._VERBOSE:
             print("starting {} with the following options:".format(cls.__name__))
             print(options)
+
+        if options.progress:
+            cls.show_progress(options.config, options.experiments)
+            return
 
         if options.cluster:
             # without setting the useMultiprocessing flag to False, we get errors on the cluster
@@ -323,6 +344,54 @@ class ClusterWork:
                     result_frame.update(results[i])
                 with open(os.path.join(experiment['path'], 'results.csv'), 'w') as results_file:
                     result_frame.to_csv(results_file, **cls._pandas_to_csv_options)
+
+    @classmethod
+    def show_progress(cls, config_file, experiment_selectors=None):
+        """ shows the progress of all experiments defined in the config_file.
+        """
+        experiments_config = cls.__load_experiments(config_file, experiment_selectors)
+
+        for config in experiments_config:
+            exp_progress, rep_progress = cls.__experiment_progress(config)
+
+            # if progress flag is set, only show the progress bars
+            bar = "["
+            bar += "=" * int(25 * exp_progress)
+            bar += " " * int(25 - 25 * exp_progress)
+            bar += "]"
+            print('{:3.1f}% {:27} {}'.format(exp_progress * 100, bar, config['name']))
+            # print('%3.1f%% %27s %s' % (exp_progress * 100, bar, config['name']))
+
+            for i, p in enumerate(rep_progress):
+                bar = "["
+                bar += "=" * int(25 * p)
+                bar += " " * int(25 - 25 * p)
+                bar += "]"
+                print('    |- {:2d} {:5.1f}% {:27}'.format(i, p * 100, bar))
+
+            try:
+                minfile = min(
+                    [os.path.join(dirname, filename) for dirname, dirnames, filenames in os.walk(config['path'])
+                        for filename in filenames if filename.endswith(('.csv', '.yml'))],
+                    key=lambda fn: os.stat(fn).st_mtime)
+
+                maxfile = max(
+                    [os.path.join(dirname, filename) for dirname, dirnames, filenames in os.walk(config['path'])
+                     for filename in filenames if filename.endswith(('.csv', '.yml'))],
+                    key=lambda fn: os.stat(fn).st_mtime)
+            except ValueError:
+                print('         started %s' % 'not yet')
+
+            else:
+                print('         started %s' % time.strftime('%Y-%m-%d %H:%M:%S',
+                                                            time.localtime(os.stat(minfile).st_mtime)))
+                print('           ended %s' % time.strftime('%Y-%m-%d %H:%M:%S',
+                                                            time.localtime(os.stat(maxfile).st_mtime)))
+
+            for k in ['repetitions', 'iterations']:
+                print('%16s %s' % (k, config[k]))
+
+            print()
 
     def __run_rep(self, config, rep) -> pd.DataFrame:
         """ run a single repetition including directory creation, log files, etc. """
@@ -485,6 +554,19 @@ class ClusterWork:
 
         return False, 0, None
 
+    @staticmethod
+    def __experiment_progress(config) -> (float, [float]):
+        rep_progress = [ClusterWork.__repetition_progress(config, rep) for rep in range(config['repetitions'])]
+        exp_progress = sum(rep_progress) / (config['repetitions'])
+        return exp_progress, rep_progress
+
+    @staticmethod
+    def __repetition_progress(config, rep) -> float:
+        log_df = ClusterWork.__load_repetition_results(config, rep)
+        if log_df is None:
+            return .0
+        completed_iterations = log_df.shape[0]
+        return float(completed_iterations) / config['iterations']
 
     @abc.abstractmethod
     def reset(self, config: dict, rep: int) -> None:
@@ -709,72 +791,7 @@ class ClusterWork:
         #
         #     return results
         #
-        # def browse(self):
-        #     """ go through all subfolders (starting at '.') and return information
-        #         about the existing experiments. if the -B option is given, all
-        #         parameters are shown, -b only displays the most important ones.
-        #         this function does *not* execute any experiments.
-        #     """
-        #     for d in self.get_exps('.'):
-        #         config = self.get_config(d)
-        #         basename = config['name'].split('/')[0]
-        #         # if -e option is used, only show requested experiments
-        #         if self.options.experiments and basename not in self.options.experiments:
-        #             continue
-        #
-        #         fullpath = os.path.join(config['path'], config['name'])
-        #
-        #         # calculate progress
-        #         prog = 0
-        #         for i in range(config['repetitions']):
-        #             prog += progress(config, i)
-        #         prog /= config['repetitions']
-        #
-        #         # if progress flag is set, only show the progress bars
-        #         if self.options.progress:
-        #             bar = "["
-        #             bar += "=" * int(prog / 4)
-        #             bar += " " * int(25 - prog / 4)
-        #             bar += "]"
-        #             print('%3i%% %27s %s' % (prog, bar, d))
-        #             continue
-        #
-        #         print('%16s %s' % ('experiment', d))
-        #
-        #         try:
-        #             minfile = min(
-        #                 (os.path.join(dirname, filename)
-        #                  for dirname, dirnames, filenames in os.walk(fullpath)
-        #                  for filename in filenames
-        #                  if filename.endswith(('.log', '.cfg'))),
-        #                 key=lambda fn: os.stat(fn).st_mtime)
-        #
-        #             maxfile = max(
-        #                 (os.path.join(dirname, filename)
-        #                  for dirname, dirnames, filenames in os.walk(fullpath)
-        #                  for filename in filenames
-        #                  if filename.endswith(('.log', '.cfg'))),
-        #                 key=lambda fn: os.stat(fn).st_mtime)
-        #         except ValueError:
-        #             print('         started %s' % 'not yet')
-        #
-        #         else:
-        #             print('         started %s' % time.strftime('%Y-%m-%d %H:%M:%S',
-        #                                                         time.localtime(os.stat(minfile).st_mtime)))
-        #             print('           ended %s' % time.strftime('%Y-%m-%d %H:%M:%S',
-        #                                                         time.localtime(os.stat(maxfile).st_mtime)))
-        #
-        #         for k in ['repetitions', 'iterations']:
-        #             print('%16s %s' % (k, config[k]))
-        #
-        #         print('%16s %i%%' % ('progress', prog))
-        #
-        #         if self.options.browse_big:
-        #             # more verbose output
-        #             for p in [p for p in config if p not in ('repetitions', 'iterations', 'path', 'name')]:
-        #                 print('%16s %s' % (p, config[p]))
-        #
-        #         print()
+
 
 
 class IncompleteConfigurationError(Exception):
