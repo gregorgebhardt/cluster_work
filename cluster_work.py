@@ -11,17 +11,18 @@
 #
 #############################################################################
 
+import abc
 import argparse
 import collections
 import itertools
 import os
 import re
 import socket
-import abc
 import time
 from copy import deepcopy
 
-import job_stream.inline, job_stream.common
+import job_stream.common
+import job_stream.inline
 import pandas as pd
 import yaml
 
@@ -89,7 +90,7 @@ def get_experiment_directories(name, path='.'):
     return experiments
 
 
-class ClusterWork:
+class ClusterWork(object):
     # change this in subclass, if you support restoring state on iteration level
     _restore_supported = False
     _default_params = {}
@@ -800,7 +801,6 @@ class ClusterWork:
         #
         #     return results
         #
-
 
 
 class IncompleteConfigurationError(Exception):
