@@ -466,21 +466,25 @@ class ClusterWork(object):
                 if 'grid' in config:
                     # if we want a grid then we choose the product of all parameters
                     iter_fun = itertools.product
+                    key = 'grid'
                 else:
                     # if we want a list then we zip the parameters together
                     iter_fun = zip
+                    key = 'list'
+
+                # TODO add support for both list and grid
 
                 # create a new config for each parameter setting
-                for values in iter_fun(*[v for v in config['grid'].values()]):
+                for values in iter_fun(*[v for v in config[key].values()]):
                     # create config file for
                     _config = deepcopy(config)
-                    del _config['grid']
-                    _converted_name = str(zip(config['grid'].keys(), map(str, values)))
+                    del _config[key]
+                    _converted_name = str(zip(config[key].keys(), map(str, values)))
                     _converted_name = re.sub("[' \[\],()]", '', _converted_name)
                     _config['path'] = os.path.join(config['path'], config['name'], _converted_name)
                     _config['name'] += '_' + _converted_name
                     _config['log_path'] = os.path.join(_config['path'], 'log')
-                    for i, ip in enumerate(config['grid'].keys()):
+                    for i, ip in enumerate(config[key].keys()):
                         _config['params'][ip] = values[i]
                     expanded_config_list.append(_config)
             else:
