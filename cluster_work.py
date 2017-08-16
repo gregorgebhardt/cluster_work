@@ -479,7 +479,7 @@ class ClusterWork(object):
                     # create config file for
                     _config = deepcopy(config)
                     del _config[key]
-                    _converted_name = str(zip(config[key].keys(), map(str, values)))
+                    _converted_name = '_'.join("{}{}".format(k, v) for k, v in zip(config[key].keys(), values))
                     _converted_name = re.sub("[' \[\],()]", '', _converted_name)
                     _config['path'] = os.path.join(config['path'], config['name'], _converted_name)
                     _config['name'] += '_' + _converted_name
