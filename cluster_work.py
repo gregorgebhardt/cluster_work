@@ -21,8 +21,6 @@ import socket
 import time
 from copy import deepcopy
 
-import job_stream.common
-import job_stream.inline
 import pandas as pd
 import yaml
 
@@ -53,6 +51,17 @@ def flatten_dict(d, parent_key='', sep='_'):
             items.append((new_key, v))
     return dict(items)
 
+def deep_dictionary_to_tuples(d: collections.MutableMapping):
+    tuple_list = []
+    for k, v in d.items():
+        if isinstance(v, collections.MutableMapping):
+            sub_tuple_list = split_deep_dictionary(v)
+            tuple_list.extend(map(lambda t: ((k, *t[0]), t[1]), sub_tuple_list))
+
+        elif isinstance(v, collections.MutableSequence):
+            tuple_list.append((k, v))
+
+    return tuple_list
 
 def get_experiments(path='.'):
     """ go through all subdirectories starting at path and return the experiment
@@ -204,9 +213,11 @@ class ClusterWork(object):
         return run_experiments
 
     @classmethod
-    def __setup_work_flow(cls, w: job_stream.inline.Work):
+    def __setup_work_flow(cls, work):
+        import job_stream.common
+        import job_stream.inline
 
-        @w.init
+        @work.init
         def _work_init():
             """initializes the work, i.e., loads the configuration file, compiles the configuration documents from
             the file and the default configurations, expands grid and list experiments, and creates the directory
@@ -223,7 +234,7 @@ class ClusterWork(object):
                                                ignore_config_for_skip=options.skip_ignore_config)
             return job_stream.inline.Multiple(work_list)
 
-        @w.frame
+        @work.frame
         def _start_experiment(store, config):
             """starts an experiment frame for each experiment. Inside the frame one job is started for each repetition.
 
@@ -246,7 +257,7 @@ class ClusterWork(object):
 
                 return job_stream.inline.Multiple(work_list)
 
-        @w.job
+        @work.job
         def _run_repetition(suite, exp_config, r):
             """runs a single repetition of the experiment by calling run_rep(exp_config, r) on the instance of
             PyExperimentSuite.
@@ -263,7 +274,7 @@ class ClusterWork(object):
 
             return repetition_results
 
-        @w.frameEnd
+        @work.frameEnd
         def _end_experiment(store, repetition_results):
             """collects the results from the individual repetitions in a pandas.DataFrame.
 
@@ -278,7 +289,7 @@ class ClusterWork(object):
 
             store.results.update(repetition_results)
 
-        @w.result()
+        @work.result()
         def _work_results(store):
             """takes the resulting store object and writes the pandas.DataFrame to a file results.csv in the
             experiment folder.
@@ -306,6 +317,9 @@ class ClusterWork(object):
             return
 
         if options.cluster:
+            import job_stream.common
+            import job_stream.inline
+
             # without setting the useMultiprocessing flag to False, we get errors on the cluster
             with job_stream.inline.Work(useMultiprocessing=False) as w:
                 cls.__setup_work_flow(w)
@@ -474,8 +488,12 @@ class ClusterWork(object):
 
                 # TODO add support for both list and grid
 
+                # convert list/grid dictionary into flat list of two element tuples, where the first entry is a
+                # tuple of the  keys and the second is the list of values
+                tuple_list = deep_dictionary_to_tuples(config[key])
+
                 # create a new config for each parameter setting
-                for values in iter_fun(*[v for v in config[key].values()]):
+                for values in iter_fun(*[t[1] for t in tuple_list]):
                     # create config file for
                     _config = deepcopy(config)
                     del _config[key]
@@ -483,6 +501,7 @@ class ClusterWork(object):
                     _converted_name = re.sub("[' \[\],()]", '', _converted_name)
                     _config['path'] = os.path.join(config['path'], config['name'], _converted_name)
                     _config['name'] += '_' + _converted_name
+                    # TODO add support for pre-defined log_path
                     _config['log_path'] = os.path.join(_config['path'], 'log')
                     for i, ip in enumerate(config[key].keys()):
                         _config['params'][ip] = values[i]
