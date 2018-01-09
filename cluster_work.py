@@ -51,17 +51,31 @@ def flatten_dict(d, parent_key='', sep='_'):
             items.append((new_key, v))
     return dict(items)
 
-def deep_dictionary_to_tuples(d: collections.MutableMapping):
-    tuple_list = []
+
+def flatten_dict_to_tuple_keys(d: collections.MutableMapping):
+    flat_dict = {}
     for k, v in d.items():
         if isinstance(v, collections.MutableMapping):
-            sub_tuple_list = split_deep_dictionary(v)
-            tuple_list.extend(map(lambda t: ((k, *t[0]), t[1]), sub_tuple_list))
+            sub_dict = flatten_dict_to_tuple_keys(v)
+            flat_dict.update({(k, *sk): sv for sk, sv in sub_dict.items()})
 
         elif isinstance(v, collections.MutableSequence):
-            tuple_list.append((k, v))
+            flat_dict[(k,)] = v
 
-    return tuple_list
+    return flat_dict
+
+
+def insert_deep_dictionary(d: collections.MutableMapping, t: tuple, value):
+    if type(t) is tuple:
+        if len(t) == 1:  # tuple contains only one key
+            d[t[0]] = value
+        else:  # tuple contains more than one key
+            if t[0] not in d:
+                d[t[0]] = dict()
+            insert_deep_dictionary(d[t[0]], t[1:], value)
+    else:
+        d[t] = value
+
 
 def get_experiments(path='.'):
     """ go through all subdirectories starting at path and return the experiment
@@ -488,23 +502,27 @@ class ClusterWork(object):
 
                 # TODO add support for both list and grid
 
-                # convert list/grid dictionary into flat list of two element tuples, where the first entry is a
-                # tuple of the  keys and the second is the list of values
-                tuple_list = deep_dictionary_to_tuples(config[key])
+                # convert list/grid dictionary into flat dictionary, where the key is a tuple of the keys and the
+                # value is the list of values
+                tuple_dict = flatten_dict_to_tuple_keys(config[key])
+                _param_names = ['.'.join(t) for t in tuple_dict]
 
                 # create a new config for each parameter setting
-                for values in iter_fun(*[t[1] for t in tuple_list]):
+                for values in iter_fun(*tuple_dict.values()):
                     # create config file for
                     _config = deepcopy(config)
                     del _config[key]
-                    _converted_name = '_'.join("{}{}".format(k, v) for k, v in zip(config[key].keys(), values))
+
+                    _converted_name = '_'.join("{}{}".format(k, v) for k, v in zip(_param_names, values))
                     _converted_name = re.sub("[' \[\],()]", '', _converted_name)
                     _config['path'] = os.path.join(config['path'], config['name'], _converted_name)
                     _config['name'] += '_' + _converted_name
-                    # TODO add support for pre-defined log_path
-                    _config['log_path'] = os.path.join(_config['path'], 'log')
-                    for i, ip in enumerate(config[key].keys()):
-                        _config['params'][ip] = values[i]
+                    if 'log_path' in config:
+                        _config['log_path'] = os.path.join(config['log_path'], config['name'], _converted_name, 'log')
+                    else:
+                        _config['log_path'] = os.path.join(_config['path'], 'log')
+                    for i, t in enumerate(tuple_dict.keys()):
+                        insert_deep_dictionary(_config['params'], t, values[i])
                     expanded_config_list.append(_config)
             else:
                 _config = deepcopy(config)
