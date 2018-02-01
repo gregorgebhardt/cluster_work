@@ -130,6 +130,49 @@ class ClusterWork(object):
     _parser.add_argument('--skip_ignore_config', action='store_true')
     _parser.add_argument('--restart_full_repetitions', action='store_true')
 
+    __runs_on_cluster = False
+
+    def __init__(self):
+        self.__log_path_rep = None
+        self.__log_path_rep_exists = False
+        self.__log_path_it = None
+        self.__log_path_it_exists = False
+        # TODO check log path
+
+    @property
+    def _log_path_rep(self):
+        if not self.__log_path_rep_exists:
+            os.makedirs(self.__log_path_rep, exist_ok=True)
+            self.__log_path_rep_exists = True
+        return self.__log_path_rep
+
+    @_log_path_rep.setter
+    def _log_path_rep(self, log_path_rep: str):
+        if os.path.exists(log_path_rep):
+            if not os.path.isdir(log_path_rep):
+                raise NotADirectoryError("The log path {} exists but is not a directory".format(log_path_rep))
+            self.__log_path_rep_exists = True
+        else:
+            self.__log_path_rep_exists = False
+        self.__log_path_rep = log_path_rep
+
+    @property
+    def _log_path_it(self):
+        if not self.__log_path_it_exists:
+            os.makedirs(self.__log_path_it, exist_ok=True)
+            self.__log_path_it_exists = True
+        return self.__log_path_it
+
+    @_log_path_it.setter
+    def _log_path_it(self, log_path_it: str):
+        if os.path.exists(log_path_it):
+            if not os.path.isdir(log_path_it):
+                raise NotADirectoryError("The log path {} exists but is not a directory".format(log_path_it))
+            self.__log_path_it_exists = True
+        else:
+            self.__log_path_it_exists = False
+        self.__log_path_it = log_path_it
+
     @classmethod
     def _init_experiments(cls, config_default, config_experiments, options):
         """allows subclasses to modify the default configuration or the configuration of the experiments.
@@ -337,6 +380,7 @@ class ClusterWork(object):
             # without setting the useMultiprocessing flag to False, we get errors on the cluster
             with job_stream.inline.Work(useMultiprocessing=False) as w:
                 cls.__setup_work_flow(w)
+                cls.__runs_on_cluster = True
                 print('[rank {}] Work has been setup...'.format(job_stream.getRank()))
 
         # if we don't run the experiment on the cluster, we run it locally
@@ -421,7 +465,21 @@ class ClusterWork(object):
 
     def __run_rep(self, config, rep) -> pd.DataFrame:
         """ run a single repetition including directory creation, log files, etc. """
-        log_filename = os.path.join(config['log_path'], 'rep_{}.csv'.format(rep))
+        # set configuration of this repetition
+        self._name = config['name']
+        self._repetitions = config['repetitions']
+        self._iterations = config['iterations']
+        self._path = config['path']
+        self._log_path = config['log_path']
+        self._log_path_rep = os.path.join(config['log_path'], '{:02d}'.format(rep), '')
+        self._plotting = config['plotting'] if 'plotting' in config else False
+        self._gui = config['gui'] if 'gui' in config else not self.__runs_on_cluster
+
+        # set params of this repetition
+        self._params = config['params']
+        self._rep = rep
+
+        log_filename = os.path.join(self._log_path, 'rep_{}.csv'.format(rep))
 
         # check if log-file for repetition exists
         repetition_has_finished, n_finished_reps, results = self.__repetition_has_completed(config, rep)
@@ -454,6 +512,11 @@ class ClusterWork(object):
             results = None
 
         for it in range(start_iteration, config['iterations']):
+            self._it = it
+
+            # update iteration log directory
+            self._log_path_it = os.path.join(config['log_path'], '{:02d}'.format(rep), '{:02d}'.format(it), '')
+
             # run iteration and get results
             it_result = self.iterate(config, rep, it)
             # we need to flatten the results if there are any nested lists or dicts
