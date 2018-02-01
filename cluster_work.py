@@ -127,6 +127,7 @@ class ClusterWork(object):
     _parser.add_argument('-e', '--experiments', nargs='+')
     _parser.add_argument('-v', '--verbose', action='store_true')
     _parser.add_argument('-p', '--progress', action='store_true')
+    _parser.add_argument('-g', '--no_gui', action='store_true')
     _parser.add_argument('--skip_ignore_config', action='store_true')
     _parser.add_argument('--restart_full_repetitions', action='store_true')
 
@@ -364,6 +365,7 @@ class ClusterWork(object):
         """ starts the experiments as given in the config file. """
         options = cls._parser.parse_args()
 
+        cls._NO_GUI = options.no_gui
         cls._VERBOSE = options.verbose
         if cls._VERBOSE:
             print("starting {} with the following options:".format(cls.__name__))
@@ -473,7 +475,7 @@ class ClusterWork(object):
         self._log_path = config['log_path']
         self._log_path_rep = os.path.join(config['log_path'], '{:02d}'.format(rep), '')
         self._plotting = config['plotting'] if 'plotting' in config else False
-        self._gui = config['gui'] if 'gui' in config else not self.__runs_on_cluster
+        self._no_gui = config['no_gui'] if 'no_gui' in config else self.__runs_on_cluster or self._NO_GUI
 
         # set params of this repetition
         self._params = config['params']
