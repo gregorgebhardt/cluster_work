@@ -476,6 +476,7 @@ class ClusterWork(object):
         self._log_path_rep = os.path.join(config['log_path'], '{:02d}'.format(rep), '')
         self._plotting = config['plotting'] if 'plotting' in config else False
         self._no_gui = config['no_gui'] if 'no_gui' in config else self.__runs_on_cluster or self._NO_GUI
+        self._seed = int(hash(self._name)) % int(1e6)
 
         # set params of this repetition
         self._params = config['params']
