@@ -275,7 +275,7 @@ class ClusterWork(object):
                             # remove experiment from list
                             skip_experiments.append(_config)
                             # expanded_experiments.remove(_config)
-                            logger.info('Experiment {} has identically finished before. '
+                            logger.info('Experiment {} has finished identically before. '
                                         'Skipping...'.format(_config['name']))
 
         run_experiments = [_config for _config in expanded_experiments if _config not in skip_experiments]
