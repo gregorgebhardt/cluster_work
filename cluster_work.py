@@ -148,7 +148,6 @@ class ClusterWork(object):
         self.__log_path_rep_exists = False
         self.__log_path_it = None
         self.__log_path_it_exists = False
-        # TODO check log path
 
     @property
     def _log_path_rep(self):
@@ -390,12 +389,11 @@ class ClusterWork(object):
                 cls.__runs_on_cluster = True
                 logger.debug('[rank {}] Work has been setup...'.format(job_stream.getRank()))
 
-        # if we don't run the experiment on the cluster, we run it locally
+                # w.run()
         else:
             config_experiments_w_expanded_params = cls.__init_experiments(options.config, options.experiments,
                                                                           options.delete, options.skip_ignore_config)
             for experiment in config_experiments_w_expanded_params:
-                # create an instance of this class for running the experiment
                 instance = cls()
 
                 # expand config_list_w_expanded_params for all repetitions and add self and rep number
@@ -405,13 +403,11 @@ class ClusterWork(object):
                                             [experiment] * num_repetitions,
                                             range(num_repetitions)))
 
-                # run each repetition sequentially
                 results = dict()
                 for repetition in repetitions_list:
                     result = ClusterWork.__run_rep(*repetition)
                     results[repetition[2]] = result
 
-                # write the results into a DataFrame and dump that frame into a csv
                 _index = pd.MultiIndex.from_product([range(experiment['repetitions']),
                                                      range(experiment['iterations'])],
                                                     names=['r', 'i'])
@@ -498,7 +494,6 @@ class ClusterWork(object):
                             'Skipping...'.format(rep, config['name']))
             return results
 
-        # reset state in subclass
         self.reset(config, rep)
 
         # if not completed but some iterations have finished, check for restart capabilities
@@ -509,12 +504,7 @@ class ClusterWork(object):
             # set start for iterations and restore state in subclass
             start_iteration = n_finished_its
             self.restore_state(config, rep, start_iteration)
-
-            # index needs to be reset since only the finished iterations are in the log file.
-            results = results.reindex(index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
-                                                                       names=['r', 'i']))
         else:
-            # if restart is not supported we need to restart from the first iteration with an empty results frame
             start_iteration = 0
             results = None
 
@@ -526,21 +516,17 @@ class ClusterWork(object):
 
             # run iteration and get results
             it_result = self.iterate(config, rep, it)
-            # we need to flatten the results if there are any nested lists or dicts
             flat_it_result = flatten_dict(it_result)
 
             if results is None:
-                # create results DataFrame after first iteration
                 results = pd.DataFrame(index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
                                                                         names=['r', 'i']),
                                        columns=flat_it_result.keys(), dtype=float)
 
-            # add results to data frame
             results.loc[(rep, it)] = flat_it_result
 
-            # write results to log file
+            # write first line with header
             if it == 0:
-                # write first line with header
                 results.iloc[[it]].to_csv(log_filename, mode='w', header=True, **self._pandas_to_csv_options)
             else:
                 results.iloc[[it]].to_csv(log_filename, mode='a', header=False, **self._pandas_to_csv_options)
