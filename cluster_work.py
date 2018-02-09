@@ -132,14 +132,22 @@ class ClusterWork(object):
 
     _parser = argparse.ArgumentParser()
     _parser.add_argument('config', metavar='CONFIG.yml', type=argparse.FileType('r'))
-    _parser.add_argument('-c', '--cluster', action='store_true')
-    _parser.add_argument('-d', '--delete', action='store_true')
-    _parser.add_argument('-e', '--experiments', nargs='+')
-    _parser.add_argument('-v', '--verbose', action='store_true')
-    _parser.add_argument('-p', '--progress', action='store_true')
-    _parser.add_argument('-g', '--no_gui', action='store_true')
+    _parser.add_argument('-c', '--cluster', action='store_true',
+                         help='runs the experiment in cluster mode, i.e., uses the openmpi features')
+    _parser.add_argument('-d', '--delete', action='store_true',
+                         help='CAUTION deletes results of previous runs')
+    _parser.add_argument('-e', '--experiments', nargs='+',
+                         help='allows to specify which experiments should be run')
+    _parser.add_argument('-v', '--verbose', action='store_true',
+                         help='DEPRECATED, use log-level instead')
+    _parser.add_argument('-p', '--progress', action='store_true',
+                         help='outputs the progress of the experiment and exits')
+    _parser.add_argument('-g', '--no_gui', action='store_true',
+                         help='tells the experiment to not use any feature that requires a GUI')
     _parser.add_argument('--skip_ignore_config', action='store_true')
     _parser.add_argument('--restart_full_repetitions', action='store_true')
+    _parser.add_argument('--log_level', nargs='?', default='INFO',
+                         help='sets the log-level for the output of ClusterWork')
 
     __runs_on_cluster = False
 
@@ -372,8 +380,14 @@ class ClusterWork(object):
 
         cls._NO_GUI = options.no_gui
         cls._VERBOSE = options.verbose
-        logger.debug("starting {} with the following options:".format(cls.__name__))
-        logger.debug(options)
+        cls._LOG_LEVEL = options.log_level
+        logger.setLevel(options.log_level)
+        if cls._VERBOSE:
+            logger.setLevel(logging.DEBUG)
+
+        logger.info("starting {} with the following options:".format(cls.__name__))
+        for option, value in vars(options).items():
+            logger.info("  - {}: {}".format(option, value))
 
         if options.progress:
             cls.show_progress(options.config, options.experiments)
