@@ -142,6 +142,8 @@ class ClusterWork(object):
                          help='DEPRECATED, use log-level instead')
     _parser.add_argument('-p', '--progress', action='store_true',
                          help='outputs the progress of the experiment and exits')
+    _parser.add_argument('-P', '--full_progress', action='store_true',
+                         help='outputs a more detailed progress of the experiment and exits')
     _parser.add_argument('-g', '--no_gui', action='store_true',
                          help='tells the experiment to not use any feature that requires a GUI')
     _parser.add_argument('--skip_ignore_config', action='store_true')
@@ -393,6 +395,9 @@ class ClusterWork(object):
             cls.show_progress(options.config, options.experiments)
             return
 
+        if options.full_progress:
+            cls.show_progress(options.config, options.experiments, full_progress=True)
+
         if options.cluster:
             import job_stream.common
             import job_stream.inline
@@ -432,7 +437,7 @@ class ClusterWork(object):
                     result_frame.to_csv(results_file, **cls._pandas_to_csv_options)
 
     @classmethod
-    def show_progress(cls, config_file, experiment_selectors=None):
+    def show_progress(cls, config_file, experiment_selectors=None, full_progress=False):
         """ shows the progress of all experiments defined in the config_file.
         """
         experiments_config = cls.__load_experiments(config_file, experiment_selectors)
@@ -448,36 +453,37 @@ class ClusterWork(object):
             print('{:3.1f}% {:27} {}'.format(exp_progress * 100, bar, config['name']))
             # print('%3.1f%% %27s %s' % (exp_progress * 100, bar, config['name']))
 
-            for i, p in enumerate(rep_progress):
-                bar = "["
-                bar += "=" * int(25 * p)
-                bar += " " * int(25 - 25 * p)
-                bar += "]"
-                print('    |- {:2d} {:5.1f}% {:27}'.format(i, p * 100, bar))
+            if full_progress:
+                for i, p in enumerate(rep_progress):
+                    bar = "["
+                    bar += "=" * int(25 * p)
+                    bar += " " * int(25 - 25 * p)
+                    bar += "]"
+                    print('    |- {:2d} {:5.1f}% {:27}'.format(i, p * 100, bar))
 
-            try:
-                minfile = min(
-                    [os.path.join(dirname, filename) for dirname, dirnames, filenames in os.walk(config['path'])
-                        for filename in filenames if filename.endswith(('.csv', '.yml'))],
-                    key=lambda fn: os.stat(fn).st_mtime)
+                try:
+                    minfile = min(
+                        [os.path.join(dirname, filename) for dirname, dirnames, filenames in os.walk(config['path'])
+                            for filename in filenames if filename.endswith(('.csv', '.yml'))],
+                        key=lambda fn: os.stat(fn).st_mtime)
 
-                maxfile = max(
-                    [os.path.join(dirname, filename) for dirname, dirnames, filenames in os.walk(config['path'])
-                     for filename in filenames if filename.endswith(('.csv', '.yml'))],
-                    key=lambda fn: os.stat(fn).st_mtime)
-            except ValueError:
-                print('         started %s' % 'not yet')
+                    maxfile = max(
+                        [os.path.join(dirname, filename) for dirname, dirnames, filenames in os.walk(config['path'])
+                         for filename in filenames if filename.endswith(('.csv', '.yml'))],
+                        key=lambda fn: os.stat(fn).st_mtime)
+                except ValueError:
+                    print('         started %s' % 'not yet')
 
-            else:
-                print('         started %s' % time.strftime('%Y-%m-%d %H:%M:%S',
-                                                            time.localtime(os.stat(minfile).st_mtime)))
-                print('           ended %s' % time.strftime('%Y-%m-%d %H:%M:%S',
-                                                            time.localtime(os.stat(maxfile).st_mtime)))
+                else:
+                    print('         started %s' % time.strftime('%Y-%m-%d %H:%M:%S',
+                                                                time.localtime(os.stat(minfile).st_mtime)))
+                    print('           ended %s' % time.strftime('%Y-%m-%d %H:%M:%S',
+                                                                time.localtime(os.stat(maxfile).st_mtime)))
 
-            for k in ['repetitions', 'iterations']:
-                print('%16s %s' % (k, config[k]))
+                for k in ['repetitions', 'iterations']:
+                    print('%16s %s' % (k, config[k]))
 
-            print()
+                print()
 
     def __run_rep(self, config, rep) -> pd.DataFrame:
         """ run a single repetition including directory creation, log files, etc. """
