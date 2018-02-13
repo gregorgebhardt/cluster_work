@@ -32,7 +32,7 @@ _logging_formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s]
 _logging_std_handler = logging.StreamHandler(sys.stdout)
 _logging_std_handler.setFormatter(_logging_formatter)
 _logging_std_handler.setLevel(logging.DEBUG)
-_logging_std_handler.addFilter(lambda lr: lr.level < logging.WARNING)
+_logging_std_handler.addFilter(lambda lr: lr.levelno < logging.WARNING)
 _logging_err_handler = logging.StreamHandler(sys.stderr)
 _logging_err_handler.setFormatter(_logging_formatter)
 _logging_err_handler.setLevel(logging.WARNING)
