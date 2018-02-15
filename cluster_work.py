@@ -560,14 +560,20 @@ class ClusterWork(object):
                          'Trying to restore at iteration {}.'.format(rep, config['name'], n_finished_its))
             # set start for iterations and restore state in subclass
             start_iteration = n_finished_its
-            if self.restore_state(config, rep, start_iteration):
-                _logger.info('Restoring iteration succeeded. Restarting from iteration {}.'.format(n_finished_its))
-                results = pd.DataFrame(data=results,
-                                       index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
-                                                                        names=['r', 'i']),
-                                       columns=results.columns, dtype=float)
-            else:
-                _logger.info('Restoring iteration NOT successful. Restarting from iteration 0.')
+            try:
+                if self.restore_state(config, rep, start_iteration):
+                    _logger.info('Restoring iteration succeeded. Restarting from iteration {}.'.format(n_finished_its))
+                    results = pd.DataFrame(data=results,
+                                           index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
+                                                                            names=['r', 'i']),
+                                           columns=results.columns, dtype=float)
+                else:
+                    _logger.info('Restoring iteration NOT successful. Restarting from iteration 0.')
+                    start_iteration = 0
+                    results = None
+            except:
+                _logger.info('Exception during restore_state. Restarting from iteration 0.')
+                _logger.info(traceback.format_exception(*sys.exc_info()))
                 start_iteration = 0
                 results = None
         else:
@@ -592,7 +598,8 @@ class ClusterWork(object):
             # run iteration and get results
             try:
                 it_result = self.iterate(config, rep, it)
-            except ValueError or OverflowError or ZeroDivisionError or ArithmeticError or FloatingPointError:
+            # except ValueError or OverflowError or ZeroDivisionError or ArithmeticError or FloatingPointError:
+            except:
                 _logger.error('Experiment {} - Repetition {} - Iteration {}'.format(config['name'], rep, it))
                 _logger.error(traceback.format_exception(*sys.exc_info()))
                 self.finalize()
