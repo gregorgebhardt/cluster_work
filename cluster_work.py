@@ -533,7 +533,7 @@ class ClusterWork(object):
         bar += "=" * round(50 * total_progress)
         bar += " " * (50 - round(50 * total_progress))
         bar += "]"
-        print('{:5.1f}% {:52}\n'.format(total_progress * 100, bar))
+        print('  Total: {:5.1f}% {:52}\n'.format(total_progress * 100, bar))
 
 
     def __run_rep(self, config, rep) -> pd.DataFrame:
