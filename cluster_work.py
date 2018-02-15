@@ -526,7 +526,7 @@ class ClusterWork(object):
 
                 print()
 
-            print()
+        print()
 
         # print total progress
         bar = "["
