@@ -480,14 +480,16 @@ class ClusterWork(object):
         """ shows the progress of all experiments defined in the config_file.
         """
         experiments_config = cls.__load_experiments(config_file, experiment_selectors)
+        total_progress = .0
 
         for config in experiments_config:
             exp_progress, rep_progress = cls.__experiment_progress(config)
+            total_progress += exp_progress / len(experiments_config)
 
-            # if progress flag is set, only show the progress bars
+            # progress bar
             bar = "["
             bar += "=" * round(25 * exp_progress)
-            bar += " " * round(25 - 25 * exp_progress)
+            bar += " " * (25 - round(25 * exp_progress))
             bar += "]"
             print('{:5.1f}% {:27} {}'.format(exp_progress * 100, bar, config['name']))
             # print('%3.1f%% %27s %s' % (exp_progress * 100, bar, config['name']))
@@ -496,7 +498,7 @@ class ClusterWork(object):
                 for i, p in enumerate(rep_progress):
                     bar = "["
                     bar += "=" * round(25 * p)
-                    bar += " " * round(25 - 25 * p)
+                    bar += " " * (25 - round(25 * p))
                     bar += "]"
                     print('    |- {:2d} {:5.1f}% {:27}'.format(i, p * 100, bar))
 
@@ -523,6 +525,16 @@ class ClusterWork(object):
                     print('%16s %s' % (k, config[k]))
 
                 print()
+
+            print()
+
+        # print total progress
+        bar = "["
+        bar += "=" * round(50 * total_progress)
+        bar += " " * (50 - round(50 * total_progress))
+        bar += "]"
+        print('{:5.1f}% {:52}\n'.format(total_progress * 100, bar))
+
 
     def __run_rep(self, config, rep) -> pd.DataFrame:
         """ run a single repetition including directory creation, log files, etc. """
