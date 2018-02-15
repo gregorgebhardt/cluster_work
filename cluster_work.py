@@ -155,7 +155,7 @@ class ClusterWork(object):
                          help='tells the experiment to not use any feature that requires a GUI')
     _parser.add_argument('--skip_ignore_config', action='store_true')
     _parser.add_argument('--restart_full_repetitions', action='store_true')
-    _parser.add_argument('--log_level', nargs='?', default='INFO',
+    _parser.add_argument('-l', '--log_level', nargs='?', default='INFO',
                          help='sets the log-level for the output of ClusterWork')
 
     __runs_on_cluster = False
