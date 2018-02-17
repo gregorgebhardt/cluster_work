@@ -365,18 +365,18 @@ class ClusterWork(object):
                 return job_stream.inline.Multiple(work_list)
 
         @work.job
-        def _run_repetition(suite, exp_config, r):
+        def _run_repetition(cw, exp_config, r):
             """runs a single repetition of the experiment by calling run_rep(exp_config, r) on the instance of
-            PyExperimentSuite.
+            ClusterWork.
 
-            :param suite: the instance of PyExperimentSuite
+            :param cw: the instance of ClusterWork
             :param exp_config: the configuration document for the experiment
             :param r: the repetition number
             """
             _logger.debug("[rank {}] In function '_run_repetition' on host {}".format(job_stream.common.getRank(),
                                                                                       socket.gethostname()))
 
-            repetition_results = suite.__run_rep(exp_config, r)
+            repetition_results = cw.__run_rep(exp_config, r)
 
             return repetition_results
 
@@ -388,6 +388,9 @@ class ClusterWork(object):
             :param repetition_results: the pandas.DataFrame with the results of the repetition.
             """
             _logger.debug("[rank {}] In function '_end_experiment'".format(job_stream.inline.getRank()))
+
+            if repetition_results is None:
+                return
 
             if not hasattr(store, 'results'):
                 store.results = pd.DataFrame(index=store.index, columns=repetition_results.columns)
@@ -403,8 +406,11 @@ class ClusterWork(object):
             """
             _logger.debug("[rank {}] In function '_work_results'".format(job_stream.inline.getRank()))
 
-            with open(os.path.join(store.config['path'], 'results.csv'), 'w') as results_file:
-                store.results.to_csv(results_file, **cls._pandas_to_csv_options)
+            if hasattr(store, 'results'):
+                with open(os.path.join(store.config['path'], 'results.csv'), 'w') as results_file:
+                    store.results.to_csv(results_file, **cls._pandas_to_csv_options)
+            else:
+                _logger.info("No results available for experiment {}".format(store.config['name']))
 
     @classmethod
     def run(cls):
@@ -469,11 +475,17 @@ class ClusterWork(object):
                 _index = pd.MultiIndex.from_product([range(experiment['repetitions']),
                                                      range(experiment['iterations'])],
                                                     names=['r', 'i'])
-                result_frame = pd.DataFrame(index=_index, columns=results[0].columns, dtype=float)
+                result_frame = None
                 for i in results:
+                    if results[i] is None:
+                        continue
+                    if result_frame is None:
+                        result_frame = pd.DataFrame(index=_index, columns=results[i].columns, dtype=float)
                     result_frame.update(results[i])
-                with open(os.path.join(experiment['path'], 'results.csv'), 'w') as results_file:
-                    result_frame.to_csv(results_file, **cls._pandas_to_csv_options)
+
+                if result_frame is not None:
+                    with open(os.path.join(experiment['path'], 'results.csv'), 'w') as results_file:
+                        result_frame.to_csv(results_file, **cls._pandas_to_csv_options)
 
     @classmethod
     def show_progress(cls, config_file, experiment_selectors=None, full_progress=False):
