@@ -584,8 +584,8 @@ class ClusterWork(object):
                     start_iteration = 0
                     results = None
             except:
-                _logger.info('Exception during restore_state. Restarting from iteration 0.')
-                _logger.info(traceback.format_exception(*sys.exc_info()))
+                _logger.error('Exception during restore_state of experiment {} in repetition {}.'
+                             'Restarting from iteration 0.'.format(config['name'], rep), exc_info=True)
                 start_iteration = 0
                 results = None
         else:
@@ -612,8 +612,8 @@ class ClusterWork(object):
                 it_result = self.iterate(config, rep, it)
             # except ValueError or OverflowError or ZeroDivisionError or ArithmeticError or FloatingPointError:
             except:
-                _logger.error('Experiment {} - Repetition {} - Iteration {}'.format(config['name'], rep, it))
-                _logger.error(traceback.format_exception(*sys.exc_info()))
+                _logger.error('Experiment {} - Repetition {} - Iteration {}'.format(config['name'], rep, it),
+                              exc_info=True)
                 self.finalize()
                 return results
 
