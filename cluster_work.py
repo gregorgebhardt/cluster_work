@@ -32,15 +32,22 @@ _logging_formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s]
 _logging_std_handler = logging.StreamHandler(sys.stdout)
 _logging_std_handler.setFormatter(_logging_formatter)
 _logging_std_handler.setLevel(logging.DEBUG)
-_logging_std_handler.addFilter(lambda lr: lr.levelno < logging.WARNING)
+_logging_filtered_std_handler = logging.StreamHandler(sys.stdout)
+_logging_filtered_std_handler.setFormatter(_logging_formatter)
+_logging_filtered_std_handler.setLevel(logging.DEBUG)
+_logging_filtered_std_handler.addFilter(lambda lr: lr.levelno < logging.WARNING)
 _logging_err_handler = logging.StreamHandler(sys.stderr)
 _logging_err_handler.setFormatter(_logging_formatter)
 _logging_err_handler.setLevel(logging.WARNING)
-logging.basicConfig(level=logging.DEBUG, handlers=[_logging_std_handler, _logging_err_handler])
-# logging.root.addHandler(_logging_std_handler)
-# logging.root.addHandler(_logging_err_handler)
 
+# default logging configuration: log everything up to WARNING to stdout and from WARNING upwards to stderr
+# set log-level to DEBUG TODO: change this to INFO
+logging.basicConfig(level=logging.DEBUG, handlers=[_logging_std_handler, _logging_err_handler])
+
+# get logger for cluster_work package
 _logger = logging.getLogger('cluster_work')
+_logger.addHandler(_logging_filtered_std_handler)
+_logger.addHandler(_logging_err_handler)
 
 
 def deep_update(d, u):
@@ -444,6 +451,8 @@ class ClusterWork(object):
             with job_stream.inline.Work(useMultiprocessing=False) as w:
                 cls.__setup_work_flow(w)
                 cls.__runs_on_cluster = True
+                _logger.removeHandler(_logging_filtered_std_handler)
+                _logger.addHandler(_logging_std_handler)
                 _logger.debug('[rank {}] Work has been setup...'.format(job_stream.getRank()))
 
                 # w.run()
@@ -453,10 +462,8 @@ class ClusterWork(object):
                 _logger.info("  - {}: {}".format(option, value))
 
             config_experiments_w_expanded_params = cls.__init_experiments(config_file=options.config,
-                                                                          experiments=options.experiments,
-                                                                          delete_old=options.delete,
-                                                                          ignore_config_for_skip=options.skip_ignore_config,
-                                                                          overwrite_old=options.overwrite)
+                experiments=options.experiments, delete_old=options.delete,
+                ignore_config_for_skip=options.skip_ignore_config, overwrite_old=options.overwrite)
             for experiment in config_experiments_w_expanded_params:
                 instance = cls()
 
@@ -547,7 +554,6 @@ class ClusterWork(object):
         bar += "]"
         print('  Total: {:5.1f}% {:52}\n'.format(total_progress * 100, bar))
 
-
     def __run_rep(self, config, rep) -> pd.DataFrame:
         """ run a single repetition including directory creation, log files, etc. """
         # set configuration of this repetition
@@ -604,14 +610,16 @@ class ClusterWork(object):
             start_iteration = 0
             results = None
 
-        # switch logging output to file
+        # set logging handlers for current repetition
         file_handler_mode = 'a' if start_iteration else 'w'
         file_handler = logging.FileHandler(os.path.join(self._log_path_rep, 'log.txt'), file_handler_mode)
         file_handler.setLevel(self._LOG_LEVEL)
         file_handler.setFormatter(_logging_formatter)
-        logging.root.addHandler(file_handler)
         if self.__runs_on_cluster:
-            logging.root.removeHandler(_logging_std_handler)
+            logging.basicConfig(level=logging.DEBUG, handlers=[file_handler, _logging_err_handler])
+        else:
+            logging.basicConfig(level=logging.DEBUG, handlers=[file_handler, _logging_filtered_std_handler,
+                                                               _logging_err_handler])
 
         for it in range(start_iteration, config['iterations']):
             self._it = it
