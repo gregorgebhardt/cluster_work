@@ -22,11 +22,13 @@ import socket
 import time
 from copy import deepcopy
 import fnmatch
-import traceback
+from typing import Tuple, Generator
 
 import pandas as pd
 import yaml
 import logging
+
+import matplotlib.pyplot as plt
 
 _logging_formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
 _logging_std_handler = logging.StreamHandler(sys.stdout)
@@ -48,6 +50,7 @@ logging.basicConfig(level=logging.DEBUG, handlers=[_logging_std_handler, _loggin
 _logger = logging.getLogger('cluster_work')
 _logger.addHandler(_logging_filtered_std_handler)
 _logger.addHandler(_logging_err_handler)
+_logger.propagate = False
 
 
 def deep_update(d, u):
@@ -163,7 +166,12 @@ class ClusterWork(object):
     _parser.add_argument('--skip_ignore_config', action='store_true')
     _parser.add_argument('--restart_full_repetitions', action='store_true')
     _parser.add_argument('-l', '--log_level', nargs='?', default='INFO',
+                         choices=['DEBUG', 'INFO', 'WARNING', 'WARN', 'ERROR'],
                          help='sets the log-level for the output of ClusterWork')
+    _parser.add_argument('--plot', nargs='?', const=True, default=False,
+                         help='calls the plotting function of the experiment and exits')
+    _parser.add_argument('--filter', default='',
+                         help='allows to filter the plotted experiments')
 
     __runs_on_cluster = False
 
@@ -432,11 +440,16 @@ class ClusterWork(object):
             logging.root.setLevel(level=logging.DEBUG)
 
         if options.progress:
-            cls.show_progress(options.config, options.experiments)
+            cls.__show_progress(options.config, options.experiments)
             return
 
         if options.full_progress:
-            cls.show_progress(options.config, options.experiments, full_progress=True)
+            cls.__show_progress(options.config, options.experiments, full_progress=True)
+            return
+
+        if options.plot:
+            cls.__plot_experiment_results(options.config, options.experiments, options.filter)
+            return
 
         if options.cluster:
             import job_stream.common
@@ -495,7 +508,7 @@ class ClusterWork(object):
                         result_frame.to_csv(results_file, **cls._pandas_to_csv_options)
 
     @classmethod
-    def show_progress(cls, config_file, experiment_selectors=None, full_progress=False):
+    def __show_progress(cls, config_file, experiment_selectors=None, full_progress=False):
         """ shows the progress of all experiments defined in the config_file.
         """
         experiments_config = cls.__load_experiments(config_file, experiment_selectors)
@@ -774,15 +787,39 @@ class ClusterWork(object):
 
     @staticmethod
     def __load_repetition_results(config, rep):
-        log_filename = os.path.join(config['log_path'], 'rep_{}.csv'.format(rep))
+        rep_results_filename = os.path.join(config['log_path'], 'rep_{}.csv'.format(rep))
 
-        if os.path.exists(log_filename):
-            log_df = pd.read_csv(log_filename, sep='\t')
-            log_df.set_index(keys=['r', 'i'], inplace=True)
+        if os.path.exists(rep_results_filename):
+            rep_results_df = pd.read_csv(rep_results_filename, sep='\t')
+            rep_results_df.set_index(keys=['r', 'i'], inplace=True)
 
-            return log_df
+            return rep_results_df
+        else:
+            return None
 
-        return None
+    @staticmethod
+    def __load_experiment_results(config):
+        results_filename = os.path.join(config['path'], 'results.csv')
+
+        if os.path.exists(results_filename):
+            results_df= pd.read_csv(results_filename, sep='\t')
+            results_df.set_index(keys=['r', 'i'], inplace=True)
+            return results_df
+        else:
+            return None
+
+    @classmethod
+    def __plot_experiment_results(cls, config_file, experiment_selectors=None, filter=''):
+        experiment_configs = cls.__load_experiments(config_file, experiment_selectors)
+
+        def create_config_and_results_generator():
+            for config in experiment_configs:
+                if filter not in config['name']:
+                    continue
+                results = ClusterWork.__load_experiment_results(config)
+                yield config, results
+
+        cls.plot_results(create_config_and_results_generator())
 
     @staticmethod
     def __repetition_has_completed(config, rep) -> (bool, int, pd.DataFrame):
@@ -834,206 +871,9 @@ class ClusterWork(object):
         """
         pass
 
-        # def get_history(self, exp, rep, tags):
-        #     """ returns the whole history for one experiment and one repetition.
-        #         tags can be a string or a list of strings. if tags is a string,
-        #         the history is returned as list of values, if tags is a list of
-        #         strings or 'all', history is returned as a dictionary of lists
-        #         of values.
-        #     """
-        #     params = self.get_config(exp)
-        #
-        #     if params == None:
-        #         raise SystemExit('experiment %s not found.' % exp)
-        #
-        #         # make list of tags, even if it is only one
-        #     if tags != 'all' and not hasattr(tags, '__iter__'):
-        #         tags = [tags]
-        #
-        #     results = {}
-        #     logfile = os.path.join(exp, '%i.log' % rep)
-        #     try:
-        #         f = open(logfile)
-        #     except IOError:
-        #         if len(tags) == 1:
-        #             return []
-        #         else:
-        #             return {}
-        #
-        #     for line in f:
-        #         pairs = line.split()
-        #         for pair in pairs:
-        #             tag, val = pair.split(':')
-        #             if tags == 'all' or tag in tags:
-        #                 if not tag in results:
-        #                     try:
-        #                         results[tag] = [eval(val)]
-        #                     except (NameError, SyntaxError):
-        #                         results[tag] = [val]
-        #                 else:
-        #                     try:
-        #                         results[tag].append(eval(val))
-        #                     except (NameError, SyntaxError):
-        #                         results[tag].append(val)
-        #
-        #     f.close()
-        #     if len(results) == 0:
-        #         if len(tags) == 1:
-        #             return []
-        #         else:
-        #             return {}
-        #             # raise ValueError('tag(s) not found: %s'%str(tags))
-        #     if len(tags) == 1:
-        #         return results[results.keys()[0]]
-        #     else:
-        #         return results
-        #
-        # def get_history_tags(self, exp, rep=0):
-        #     """ returns all available tags (logging keys) of the given experiment
-        #         repetition.
-        #
-        #         Note: Technically, each repetition could have different
-        #         tags, therefore the rep number can be passed in as parameter,
-        #         even though usually all repetitions have the same tags. The default
-        #         repetition is 0 and in most cases, can be omitted.
-        #     """
-        #     history = self.get_history(exp, rep, 'all')
-        #     return history.keys()
-        #
-        # def get_value(self, exp, rep, tags, which='last'):
-        #     """ Like get_history(..) but returns only one single value rather
-        #         than the whole list.
-        #         tags can be a string or a list of strings. if tags is a string,
-        #         the history is returned as a single value, if tags is a list of
-        #         strings, history is returned as a dictionary of values.
-        #         'which' can be one of the following:
-        #             last: returns the last value of the history
-        #              min: returns the minimum value of the history
-        #              max: returns the maximum value of the history
-        #                #: (int) returns the value at that index
-        #     """
-        #     history = self.get_history(exp, rep, tags)
-        #
-        #     # empty histories always return None
-        #     if len(history) == 0:
-        #         return None
-        #
-        #     # distinguish dictionary (several tags) from list
-        #     if type(history) == dict:
-        #         for h in history:
-        #             if which == 'last':
-        #                 history[h] = history[h][-1]
-        #             if which == 'min':
-        #                 history[h] = min(history[h])
-        #             if which == 'max':
-        #                 history[h] = max(history[h])
-        #             if type(which) == int:
-        #                 history[h] = history[h][which]
-        #         return history
-        #
-        #     else:
-        #         if which == 'last':
-        #             return history[-1]
-        #         if which == 'min':
-        #             return min(history)
-        #         if which == 'max':
-        #             return max(history)
-        #         if type(which) == int:
-        #             return history[which]
-        #         else:
-        #             return None
-        #
-        # def get_values_fix_params(self, exp, rep, tag, which='last', **kwargs):
-        #     """ this function uses get_value(..) but returns all values where the
-        #         subexperiments match the additional kwargs arguments. if alpha=1.0,
-        #         beta=0.01 is given, then only those experiment values are returned,
-        #         as a list.
-        #     """
-        #     subexps = self.get_exps(exp)
-        #     tagvalues = ['%s%s' % (k, convert_param_to_dirname(kwargs[k])) for k in kwargs]
-        #
-        #     values = [self.get_value(se, rep, tag, which) for se in subexps if all(map(lambda tv: tv in se, tagvalues))]
-        #     params = [self.get_config(se) for se in subexps if all(map(lambda tv: tv in se, tagvalues))]
-        #
-        #     return values, params
-        #
-        # def get_histories_fix_params(self, exp, rep, tag, **kwargs):
-        #     """ this function uses get_history(..) but returns all histories where the
-        #         subexperiments match the additional kwargs arguments. if alpha=1.0,
-        #         beta = 0.01 is given, then only those experiment histories are returned,
-        #         as a list.
-        #     """
-        #     subexps = self.get_exps(exp)
-        #     tagvalues = [re.sub("0+$", '0', '%s%f' % (k, kwargs[k])) for k in kwargs]
-        #
-        #     histories = [self.get_history(se, rep, tag) for se in subexps if all(map(lambda tv: tv in se, tagvalues))]
-        #     params = [self.get_config(se) for se in subexps if all(map(lambda tv: tv in se, tagvalues))]
-        #
-        #     return histories, params
-        #
-        # def get_histories_over_repetitions(self, exp, tags, aggregate):
-        #     """ this function gets all histories of all repetitions using get_history() on the given
-        #         tag(s), and then applies the function given by 'aggregate' to all corresponding values
-        #         in each history over all iterations. Typical aggregate functions could be 'mean' or
-        #         'max'.
-        #     """
-        #     params = self.get_config(exp)
-        #
-        #     # explicitly make tags list in case of 'all'
-        #     if tags == 'all':
-        #         tags = self.get_history(exp, 0, 'all').keys()
-        #
-        #     # make list of tags if it is just a string
-        #     if not hasattr(tags, '__iter__'):
-        #         tags = [tags]
-        #
-        #     results = {}
-        #     for tag in tags:
-        #         # get all histories
-        #         histories = np.zeros((params['repetitions'], params['iterations']))
-        #         skipped = []
-        #         for i in range(params['repetitions']):
-        #             try:
-        #                 histories[i, :] = self.get_history(exp, i, tag)
-        #             except ValueError:
-        #                 h = self.get_history(exp, i, tag)
-        #                 if len(h) == 0:
-        #                     # history not existent, skip it
-        #                     print('warning: history %i has length 0 (expected: %i). it will be skipped.' % (
-        #                         i, params['iterations']))
-        #                     skipped.append(i)
-        #                 elif len(h) > params['iterations']:
-        #                     # if history too long, crop it
-        #                     print('warning: history %i has length %i (expected: %i). it will be truncated.' % (
-        #                         i, len(h), params['iterations']))
-        #                     h = h[:params['iterations']]
-        #                     histories[i, :] = h
-        #                 elif len(h) < params['iterations']:
-        #                     # if history too short, crop everything else
-        #                     print(
-        #                         'warning: history %i has length %i (expected: %i). all other histories will be truncated.' %
-        #                         (i, len(h), params['iterations']))
-        #                     params['iterations'] = len(h)
-        #                     histories = histories[:, :params['iterations']]
-        #                     histories[i, :] = h
-        #
-        #         # remove all rows that have been skipped
-        #         histories = np.delete(histories, skipped, axis=0)
-        #         params['repetitions'] -= len(skipped)
-        #
-        #         # calculate result from each column with aggregation function
-        #         aggregated = np.zeros(params['iterations'])
-        #         for i in range(params['iterations']):
-        #             aggregated[i] = aggregate(histories[:, i])
-        #
-        #         # if only one tag is requested, return list immediately, otherwise append to dictionary
-        #         if len(tags) == 1:
-        #             return aggregated
-        #         else:
-        #             results[tag] = aggregated
-        #
-        #     return results
-        #
+    @classmethod
+    def plot_results(cls, configs_results: Generator):
+        raise NotImplementedError('plot_results needs to be implemented by subclass.')
 
 
 class IncompleteConfigurationError(Exception):
