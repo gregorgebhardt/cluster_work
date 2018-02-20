@@ -28,8 +28,6 @@ import pandas as pd
 import yaml
 import logging
 
-import matplotlib.pyplot as plt
-
 _logging_formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
 _logging_std_handler = logging.StreamHandler(sys.stdout)
 _logging_std_handler.setFormatter(_logging_formatter)
@@ -43,8 +41,8 @@ _logging_err_handler.setFormatter(_logging_formatter)
 _logging_err_handler.setLevel(logging.WARNING)
 
 # default logging configuration: log everything up to WARNING to stdout and from WARNING upwards to stderr
-# set log-level to DEBUG TODO: change this to INFO
-logging.basicConfig(level=logging.DEBUG, handlers=[_logging_std_handler, _logging_err_handler])
+# set log-level to INFO
+logging.basicConfig(level=logging.INFO, handlers=[_logging_std_handler, _logging_err_handler])
 
 # get logger for cluster_work package
 _logger = logging.getLogger('cluster_work')
@@ -435,9 +433,11 @@ class ClusterWork(object):
         cls._NO_GUI = options.no_gui
         cls._VERBOSE = options.verbose
         cls._LOG_LEVEL = options.log_level.upper()
-        logging.root.setLevel(level=cls._LOG_LEVEL)
+        _logging_filtered_std_handler.setLevel(level=cls._LOG_LEVEL)
+        _logging_std_handler.setLevel(level=cls._LOG_LEVEL)
         if cls._VERBOSE:
-            logging.root.setLevel(level=logging.DEBUG)
+            _logging_filtered_std_handler.setLevel(level=logging.DEBUG)
+            _logging_std_handler.setLevel(level=cls._LOG_LEVEL)
 
         if options.progress:
             cls.__show_progress(options.config, options.experiments)
@@ -457,6 +457,7 @@ class ClusterWork(object):
         if options.cluster:
             import job_stream.common
             import job_stream.inline
+            cls.__runs_on_cluster = True
 
             if job_stream.common.getRank() == 0:
                 _logger.info("starting {} with the following options:".format(cls.__name__))
@@ -466,7 +467,6 @@ class ClusterWork(object):
             # without setting the useMultiprocessing flag to False, we get errors on the cluster
             with job_stream.inline.Work(useMultiprocessing=False) as w:
                 cls.__setup_work_flow(w)
-                cls.__runs_on_cluster = True
                 _logger.removeHandler(_logging_filtered_std_handler)
                 _logger.addHandler(_logging_std_handler)
                 _logger.debug('[rank {}] Work has been setup...'.format(job_stream.getRank()))
@@ -477,10 +477,12 @@ class ClusterWork(object):
             for option, value in vars(options).items():
                 _logger.info("  - {}: {}".format(option, value))
 
-            config_experiments_w_expanded_params = cls.__init_experiments(config_file=options.config,
-                experiments=options.experiments, delete_old=options.delete,
-                ignore_config_for_skip=options.skip_ignore_config, overwrite_old=options.overwrite)
-            for experiment in config_experiments_w_expanded_params:
+            config_exps_w_expanded_params = cls.__init_experiments(config_file=options.config,
+                                                                   experiments=options.experiments,
+                                                                   delete_old=options.delete,
+                                                                   ignore_config_for_skip=options.skip_ignore_config,
+                                                                   overwrite_old=options.overwrite)
+            for experiment in config_exps_w_expanded_params:
                 instance = cls()
 
                 # expand config_list_w_expanded_params for all repetitions and add self and rep number
@@ -619,7 +621,7 @@ class ClusterWork(object):
                     results = None
             except:
                 _logger.error('Exception during restore_state of experiment {} in repetition {}.'
-                             'Restarting from iteration 0.'.format(config['name'], rep), exc_info=True)
+                              'Restarting from iteration 0.'.format(config['name'], rep), exc_info=True)
                 start_iteration = 0
                 results = None
         else:
@@ -805,7 +807,7 @@ class ClusterWork(object):
         results_filename = os.path.join(config['path'], 'results.csv')
 
         if os.path.exists(results_filename):
-            results_df= pd.read_csv(results_filename, sep='\t')
+            results_df = pd.read_csv(results_filename, sep='\t')
             results_df.set_index(keys=['r', 'i'], inplace=True)
             return results_df
         else:
