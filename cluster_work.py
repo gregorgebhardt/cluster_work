@@ -22,7 +22,7 @@ import socket
 import time
 from copy import deepcopy
 import fnmatch
-from typing import Tuple, Generator
+from typing import Generator
 
 import pandas as pd
 import yaml
@@ -634,10 +634,13 @@ class ClusterWork(object):
         file_handler.setLevel(self._LOG_LEVEL)
         file_handler.setFormatter(_logging_formatter)
         if self.__runs_on_cluster:
-            logging.basicConfig(level=logging.DEBUG, handlers=[file_handler, _logging_err_handler])
+            logging.root.setLevel(self._LOG_LEVEL)
+            logging.root.handlers.clear()
+            logging.root.handlers = [file_handler, _logging_err_handler]
         else:
-            logging.basicConfig(level=logging.DEBUG, handlers=[file_handler, _logging_filtered_std_handler,
-                                                               _logging_err_handler])
+            logging.root.setLevel(self._LOG_LEVEL)
+            logging.root.handlers.clear()
+            logging.root.handlers = [file_handler, _logging_filtered_std_handler, _logging_err_handler]
 
         for it in range(start_iteration, config['iterations']):
             self._it = it
@@ -814,12 +817,12 @@ class ClusterWork(object):
             return None
 
     @classmethod
-    def __plot_experiment_results(cls, config_file, experiment_selectors=None, filter=''):
+    def __plot_experiment_results(cls, config_file, experiment_selectors=None, experiment_filter=''):
         experiment_configs = cls.__load_experiments(config_file, experiment_selectors)
 
         def create_config_and_results_generator():
             for config in experiment_configs:
-                if filter not in config['name']:
+                if experiment_filter not in config['name']:
                     continue
                 results = ClusterWork.__load_experiment_results(config)
                 yield config, results
