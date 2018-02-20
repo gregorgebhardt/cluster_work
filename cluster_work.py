@@ -170,7 +170,7 @@ class ClusterWork(object):
                          help='sets the log-level for the output of ClusterWork')
     _parser.add_argument('--plot', nargs='?', const=True, default=False,
                          help='calls the plotting function of the experiment and exits')
-    _parser.add_argument('--filter', default='',
+    _parser.add_argument('--filter', default=argparse.SUPPRESS,
                          help='allows to filter the plotted experiments')
 
     __runs_on_cluster = False
@@ -448,7 +448,10 @@ class ClusterWork(object):
             return
 
         if options.plot:
-            cls.__plot_experiment_results(options.config, options.experiments, options.filter)
+            if hasattr(options, 'filter'):
+                cls.__plot_experiment_results(options.config, options.experiments, options.filter)
+            else:
+                cls.__plot_experiment_results(options.config, options.experiments)
             return
 
         if options.cluster:
