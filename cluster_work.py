@@ -651,8 +651,8 @@ class ClusterWork(object):
             # run iteration and get results
             try:
                 it_result = self.iterate(config, rep, it)
-            # except ValueError or OverflowError or ZeroDivisionError or ArithmeticError or FloatingPointError:
-            except:
+            except ValueError or OverflowError or ZeroDivisionError or ArithmeticError or FloatingPointError:
+            # except:
                 _logger.error('Experiment {} - Repetition {} - Iteration {}'.format(config['name'], rep, it),
                               exc_info=True)
                 self.finalize()
