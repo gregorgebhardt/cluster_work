@@ -458,6 +458,7 @@ class ClusterWork(object):
             import job_stream.common
             import job_stream.inline
             cls.__runs_on_cluster = True
+            cls._MP_CONTEXT = 'forkserver'
 
             if job_stream.common.getRank() == 0:
                 _logger.info("starting {} with the following options:".format(cls.__name__))
@@ -473,6 +474,7 @@ class ClusterWork(object):
 
                 # w.run()
         else:
+            cls._MP_CONTEXT = 'fork'
             _logger.info("starting {} with the following options:".format(cls.__name__))
             for option, value in vars(options).items():
                 _logger.info("  - {}: {}".format(option, value))
