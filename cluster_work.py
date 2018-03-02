@@ -366,7 +366,7 @@ class ClusterWork(object):
             _logger.info("[rank {}] [{}] creating work for <{}>".format(job_stream.inline.getRank(),
                                                                         socket.gethostname(),
                                                                         config['name']))
-            _logger.info("[rank {}] [{}] cpuCount: {}, hostCpuCount: {}".format(job_stream.common.getRank(),
+            _logger.debug("[rank {}] [{}] cpuCount: {}, hostCpuCount: {}".format(job_stream.common.getRank(),
                                                                                 socket.gethostname(),
                                                                                 job_stream.common.getCpuCount(),
                                                                                 job_stream.common.getHostCpuCount()))
