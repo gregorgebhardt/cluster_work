@@ -603,7 +603,6 @@ class ClusterWork(object):
         self._rep = rep
 
         log_filename = os.path.join(self._log_path, 'rep_{}.csv'.format(rep))
-        _logger.info()
 
         # check if log-file for repetition exists
         repetition_has_finished, n_finished_its, results = self.__repetition_has_completed(config, rep)
