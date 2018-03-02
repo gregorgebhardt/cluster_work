@@ -18,6 +18,7 @@ import itertools
 import os
 import sys
 import re
+import gc
 import socket
 import time
 from copy import deepcopy
@@ -394,6 +395,7 @@ class ClusterWork(object):
                                                                         exp_config['name'], r))
 
             repetition_results = cw.__run_rep(exp_config, r)
+            gc.collect()
 
             return repetition_results
 
@@ -510,6 +512,7 @@ class ClusterWork(object):
                 for repetition in repetitions_list:
                     result = ClusterWork.__run_rep(*repetition)
                     results[repetition[2]] = result
+                    gc.collect()
 
                 _index = pd.MultiIndex.from_product([range(experiment['repetitions']),
                                                      range(experiment['iterations'])],
