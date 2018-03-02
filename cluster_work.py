@@ -444,6 +444,7 @@ class ClusterWork(object):
         cls._NO_GUI = options.no_gui
         cls._VERBOSE = options.verbose
         cls._LOG_LEVEL = options.log_level.upper()
+        cls._RESTART_FULL_REPETITIONS = options.restart_full_repetitions
         _logging_filtered_std_handler.setLevel(level=cls._LOG_LEVEL)
         _logging_std_handler.setLevel(level=cls._LOG_LEVEL)
         if cls._VERBOSE:
@@ -616,7 +617,7 @@ class ClusterWork(object):
         self.reset(config, rep)
 
         # if not completed but some iterations have finished, check for restart capabilities
-        if self._restore_supported and n_finished_its > 0:
+        if self._restore_supported and n_finished_its > 0 and not self._RESTART_FULL_REPETITIONS:
             _logger.info('Repetition {} of experiment {} has started before. '
                          'Trying to restore at iteration {}.'.format(rep, config['name'], n_finished_its))
             # set start for iterations and restore state in subclass
