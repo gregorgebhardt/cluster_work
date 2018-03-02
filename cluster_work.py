@@ -346,7 +346,8 @@ class ClusterWork(object):
 
             :return: a job_stream.inline.Multiple object with one configuration document for each experiment.
             """
-            _logger.debug("[rank {}] In function '_work_init'".format(job_stream.inline.getRank()))
+            _logger.debug("[rank {}] [{}] parsing arguments and initializing experiments".format(
+                job_stream.inline.getRank(), socket.gethostname()))
 
             options = cls._parser.parse_args()
             work_list = cls.__init_experiments(config_file=options.config, experiments=options.experiments,
@@ -362,11 +363,13 @@ class ClusterWork(object):
             :param store: object to store results
             :param config: the configuration document for the experiment
             """
-            _logger.debug("[rank {}] In function '_start_experiment' of {}".format(job_stream.inline.getRank(),
-                                                                                   config['name']))
-            _logger.debug("[rank {}] cpuCount: {}, hostCpuCount: {}".format(job_stream.common.getRank(),
-                                                                            job_stream.common.getCpuCount(),
-                                                                            job_stream.common.getHostCpuCount()))
+            _logger.info("[rank {}] [{}] creating work for <{}>".format(job_stream.inline.getRank(),
+                                                                        socket.gethostname(),
+                                                                        config['name']))
+            _logger.info("[rank {}] [{}] cpuCount: {}, hostCpuCount: {}".format(job_stream.common.getRank(),
+                                                                                socket.gethostname(),
+                                                                                job_stream.common.getCpuCount(),
+                                                                                job_stream.common.getHostCpuCount()))
 
             if not hasattr(store, 'index'):
                 store.index = pd.MultiIndex.from_product([range(config['repetitions']), range(config['iterations'])])
@@ -386,8 +389,9 @@ class ClusterWork(object):
             :param exp_config: the configuration document for the experiment
             :param r: the repetition number
             """
-            _logger.debug("[rank {}] In function '_run_repetition' on host {}".format(job_stream.common.getRank(),
-                                                                                      socket.gethostname()))
+            _logger.info('[rank {}] [{}] starting <{}> - Rep {}'.format(job_stream.getRank(),
+                                                                        socket.gethostname(),
+                                                                        exp_config['name'], r))
 
             repetition_results = cw.__run_rep(exp_config, r)
 
@@ -400,7 +404,10 @@ class ClusterWork(object):
             :param store: the store object from the frame.
             :param repetition_results: the pandas.DataFrame with the results of the repetition.
             """
-            _logger.debug("[rank {}] In function '_end_experiment'".format(job_stream.inline.getRank()))
+            _logger.info("[rank {}] [{}] storing results of <{}> - Rep {}".format(job_stream.inline.getRank(),
+                                                                                  socket.gethostname(),
+                                                                                  store.config['name'],
+                                                                                  repetition_results.index[0][0]))
 
             if repetition_results is None:
                 return
@@ -417,13 +424,17 @@ class ClusterWork(object):
 
             :param store: the store object emitted from the frame.
             """
-            _logger.debug("[rank {}] In function '_work_results'".format(job_stream.inline.getRank()))
+            _logger.info("[rank {}] [{}] saving results of <{}> to disk".format(job_stream.inline.getRank(),
+                                                                                socket.gethostname(),
+                                                                                store.config['name']))
 
             if hasattr(store, 'results'):
                 with open(os.path.join(store.config['path'], 'results.csv'), 'w') as results_file:
                     store.results.to_csv(results_file, **cls._pandas_to_csv_options)
             else:
-                _logger.info("No results available for experiment {}".format(store.config['name']))
+                _logger.warning("[rank {}] [{}] no results available for <{}>".format(job_stream.inline.getRank(),
+                                                                                      socket.gethostname(),
+                                                                                      store.config['name']))
 
     @classmethod
     def run(cls):
@@ -592,6 +603,7 @@ class ClusterWork(object):
         self._rep = rep
 
         log_filename = os.path.join(self._log_path, 'rep_{}.csv'.format(rep))
+        _logger.info()
 
         # check if log-file for repetition exists
         repetition_has_finished, n_finished_its, results = self.__repetition_has_completed(config, rep)
