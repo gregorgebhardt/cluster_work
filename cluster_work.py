@@ -377,16 +377,15 @@ class ClusterWork(object):
                 store.index.set_names(['r', 'i'], inplace=True)
                 store.config = config
                 # create work list
-                work_list = [job_stream.inline.Args(cls(), config, i) for i in range(config['repetitions'])]
+                work_list = [job_stream.inline.Args(config, i) for i in range(config['repetitions'])]
 
                 return job_stream.inline.Multiple(work_list)
 
         @work.job
-        def _run_repetition(cw, exp_config, r):
+        def _run_repetition(exp_config, r):
             """runs a single repetition of the experiment by calling run_rep(exp_config, r) on the instance of
             ClusterWork.
 
-            :param cw: the instance of ClusterWork
             :param exp_config: the configuration document for the experiment
             :param r: the repetition number
             """
@@ -394,7 +393,7 @@ class ClusterWork(object):
                                                                         socket.gethostname(),
                                                                         exp_config['name'], r))
 
-            repetition_results = cw.__run_rep(exp_config, r)
+            repetition_results = cls().__run_rep(exp_config, r)
             gc.collect()
 
             return repetition_results
@@ -499,18 +498,15 @@ class ClusterWork(object):
                                                                    ignore_config_for_skip=options.skip_ignore_config,
                                                                    overwrite_old=options.overwrite)
             for experiment in config_exps_w_expanded_params:
-                instance = cls()
-
                 # expand config_list_w_expanded_params for all repetitions and add self and rep number
                 repetitions_list = []
                 num_repetitions = experiment['repetitions']
-                repetitions_list.extend(zip([instance] * num_repetitions,
-                                            [experiment] * num_repetitions,
+                repetitions_list.extend(zip([experiment] * num_repetitions,
                                             range(num_repetitions)))
 
                 results = dict()
                 for repetition in repetitions_list:
-                    result = ClusterWork.__run_rep(*repetition)
+                    result = cls().__run_rep(*repetition)
                     results[repetition[2]] = result
                     gc.collect()
 
