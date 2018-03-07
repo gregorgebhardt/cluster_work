@@ -899,3 +899,7 @@ class ClusterWork(object):
 
 class IncompleteConfigurationError(Exception):
     pass
+
+
+class InvalidParameterArgument(Exception):
+    pass
