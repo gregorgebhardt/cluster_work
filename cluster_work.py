@@ -21,6 +21,7 @@ import re
 import gc
 import socket
 import time
+import zlib
 from copy import deepcopy
 import fnmatch
 from typing import Generator
@@ -596,7 +597,7 @@ class ClusterWork(object):
         self._log_path_rep = os.path.join(config['log_path'], '{:02d}'.format(rep), '')
         self._plotting = config['plotting'] if 'plotting' in config else True
         self._no_gui = (not config['gui'] if 'gui' in config else False) or self.__runs_on_cluster or self._NO_GUI
-        self._seed_base = int(hash(self._name)) % int(1e6)
+        self._seed_base = zlib.adler32(self._name) % int(1e6)
         self._seed = self._seed_base + 1000 * rep
 
         # set params of this repetition
