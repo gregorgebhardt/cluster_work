@@ -596,7 +596,8 @@ class ClusterWork(object):
         self._log_path_rep = os.path.join(config['log_path'], '{:02d}'.format(rep), '')
         self._plotting = config['plotting'] if 'plotting' in config else True
         self._no_gui = (not config['gui'] if 'gui' in config else False) or self.__runs_on_cluster or self._NO_GUI
-        self._seed = int(hash(self._name)) % int(1e6)
+        self._seed_base = int(hash(self._name)) % int(1e6)
+        self._seed = self._seed_base + 1000 * rep
 
         # set params of this repetition
         self._params = config['params']
@@ -657,6 +658,8 @@ class ClusterWork(object):
 
         for it in range(start_iteration, config['iterations']):
             self._it = it
+            self._seed = self._seed_base + 1000 * rep + it
+
 
             # update iteration log directory
             self._log_path_it = os.path.join(config['log_path'], '{:02d}'.format(rep), '{:02d}'.format(it), '')
