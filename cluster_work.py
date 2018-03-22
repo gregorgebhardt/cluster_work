@@ -508,7 +508,7 @@ class ClusterWork(object):
                 results = dict()
                 for repetition in repetitions_list:
                     result = cls().__run_rep(*repetition)
-                    results[repetition[2]] = result
+                    results[repetition[1]] = result
                     gc.collect()
 
                 _index = pd.MultiIndex.from_product([range(experiment['repetitions']),
