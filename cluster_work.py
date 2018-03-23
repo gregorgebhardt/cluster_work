@@ -504,9 +504,11 @@ class ClusterWork(object):
                 num_repetitions = experiment['repetitions']
                 repetitions_list.extend(zip([experiment] * num_repetitions,
                                             range(num_repetitions)))
+                _logger.info("starting experiment {}".format(experiment['name']))
 
                 results = dict()
                 for repetition in repetitions_list:
+                    _logger.info("running repetition {}".format(repetition[1]))
                     result = cls().__run_rep(*repetition)
                     results[repetition[1]] = result
                     gc.collect()
