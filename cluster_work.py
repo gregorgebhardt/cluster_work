@@ -24,7 +24,7 @@ import time
 import zlib
 from copy import deepcopy
 import fnmatch
-from typing import Generator
+from typing import Generator, Tuple, List
 
 import pandas as pd
 import yaml
@@ -102,48 +102,16 @@ def insert_deep_dictionary(d: collections.MutableMapping, t: tuple, value):
         d[t] = value
 
 
-def get_experiments(path='.'):
-    """ go through all subdirectories starting at path and return the experiment
-        identifiers (= directory names) of all existing experiments. A directory
-        is considered an experiment if it contains a experiment.cfg file.
-    """
-    exps = []
-    for dp, dn, fn in os.walk(path):
-        if 'experiment.yml' in fn:
-            subdirs = [os.path.join(dp, d) for d in os.listdir(dp) if os.path.isdir(os.path.join(dp, d))]
-            if all(map(lambda s: get_experiments(s) == [], subdirs)):
-                exps.append(dp)
-    return exps
-
-
-def get_experiment_config(path, cfgname='experiment.yml'):
-    """ reads the parameters of the experiment (= path) given.
-    """
-    with open(os.path.join(path, cfgname), 'r') as f:
-        config = yaml.load(f)
-        return config
-
-
-def get_experiment_directories(name, path='.'):
-    """ given an experiment name (used in section titles), this function
-        returns all subdirectories that contain an experiment with that name.
-    """
-    experiments = []
-    for dir_path, dir_names, filenames in os.walk(path):
-        if 'experiment.yml' in filenames:
-            with open(os.path.join(dir_path, 'experiment.yml')) as f:
-                for d in yaml.load_all(f):
-                    if 'name' in d and d['name'] == name:
-                        experiments.append(dir_path)
-    return experiments
-
-
 class ClusterWork(object):
     # change this in subclass, if you support restoring state on iteration level
     _restore_supported = False
     _default_params = {}
     _pandas_to_csv_options = dict(na_rep='NaN', sep='\t', float_format="%+.8e")
     _VERBOSE = False
+    _NO_GUI = False
+    _LOG_LEVEL = 'DEBUG'
+    _RESTART_FULL_REPETITIONS = False
+    _MP_CONTEXT = 'fork'
 
     _parser = argparse.ArgumentParser()
     _parser.add_argument('config', metavar='CONFIG.yml', type=argparse.FileType('r'))
@@ -215,23 +183,49 @@ class ClusterWork(object):
             self.__log_path_it_exists = False
         self.__log_path_it = log_path_it
 
-    @classmethod
-    def _init_experiments(cls, config_default, config_experiments, options):
-        """allows subclasses to modify the default configuration or the configuration of the experiments.
-
-        :param config_default: the default configuration document
-        :param config_experiments: the documents of the experiment configurations
-        :param options: the options read by the argument parser
+    @staticmethod
+    def get_experiments(path='.'):
+        """ go through all subdirectories starting at path and return the experiment
+            identifiers (= directory names) of all existing experiments. A directory
+            is considered an experiment if it contains a experiment.yml file.
         """
-        pass
+        exps = []
+        for dp, dn, fn in os.walk(path):
+            if 'experiment.yml' in fn:
+                subdirs = [os.path.join(dp, d) for d in os.listdir(dp) if os.path.isdir(os.path.join(dp, d))]
+                if all(map(lambda s: ClusterWork.get_experiments(s) == [], subdirs)):
+                    exps.append(dp)
+        return exps
+
+    @staticmethod
+    def get_experiment_config(path, config_filename='experiment.yml'):
+        """ reads the parameters of the experiment (= path) given.
+        """
+        with open(os.path.join(path, config_filename), 'r') as f:
+            config = yaml.load(f)
+            return config
+
+    @staticmethod
+    def get_experiment_directories(name, path='.'):
+        """ given an experiment name (used in section titles), this function
+            returns all subdirectories that contain an experiment with that name.
+        """
+        experiments = []
+        for dir_path, dir_names, filenames in os.walk(path):
+            if 'experiment.yml' in filenames:
+                with open(os.path.join(dir_path, 'experiment.yml')) as f:
+                    for d in yaml.load_all(f):
+                        if 'name' in d and d['name'] == name:
+                            experiments.append(dir_path)
+        return experiments
 
     @classmethod
-    def __load_experiments(cls, config_file, experiment_selectors=None):
-        """loads all experiment configurations from the given file, merges them with the default configuration and
+    def load_experiments(cls, config_file, experiment_selectors=None):
+        """loads all experiment configurations from the given stream, merges them with the default configuration and
         expands list or grid parameters
 
-        :config_file: path to the configuration yaml for the experiments that should be loaded.
-        :experiment_selectors: list of experiment names. Only the experiments with a name in this list will be loaded.
+        :config_file: file stream of the configuration yaml for the experiments that should be loaded.
+        :experiment_selectors: list of experiment names. Only the experiments in this list will be loaded.
         :return: returns the experiment configurations
         """
         try:
@@ -239,7 +233,7 @@ class ClusterWork(object):
         except IOError:
             raise SystemExit('config file %s not found.' % config_file)
 
-        if _config_documents[0]['name'].lower() == 'DEFAULT'.lower():
+        if _config_documents[0]['name'].lower() == 'default':
             default_config = _config_documents[0]
             experiments_config = _config_documents[1:]
         else:
@@ -247,6 +241,7 @@ class ClusterWork(object):
             experiments_config = _config_documents
 
         # iterate over experiments and compute effective configuration and parameters
+        # TODO add warning if yaml has parameters that do not appear in cls._default_parameters
         effective_experiments = []
         for _config_e in experiments_config:
             if not experiment_selectors or _config_e['name'] in experiment_selectors:
@@ -269,9 +264,95 @@ class ClusterWork(object):
                     raise IncompleteConfigurationError(
                         'config does not contain all required keys: {}'.format(missing_keys))
 
-        expanded_experiments = cls.__expand_param_list(effective_experiments)
+        _experiments = cls.__adapt_experiment_path(effective_experiments)
+        _experiments = cls.__expand_experiments(_experiments)
+        _experiments = cls.__adapt_experiment_log_path(_experiments)
 
-        return expanded_experiments
+        return _experiments
+
+    @staticmethod
+    def __adapt_experiment_path(config_list):
+        """ adapts the path of the experiment and sets the log-path
+        """
+        # for one single experiment, still wrap it in list
+        if type(config_list) == dict:
+            config_list = [config_list]
+
+        expanded_config_list = []
+        for config in config_list:
+            config['path'] = os.path.join(config['path'], config['name'])
+            expanded_config_list.append(config)
+
+        return expanded_config_list
+
+    @staticmethod
+    def __adapt_experiment_log_path(config_list):
+        """ adapts the log path of the experiment and sets the log-path
+        """
+        # for one single experiment, still wrap it in list
+        if type(config_list) == dict:
+            config_list = [config_list]
+
+        expanded_config_list = []
+        for config in config_list:
+            if 'log_path' in config:
+                config['log_path'] = os.path.join(config['log_path'], config['name'])
+            else:
+                config['log_path'] = os.path.join(config['path'], 'log')
+            expanded_config_list.append(config)
+
+        return expanded_config_list
+
+    @staticmethod
+    def __expand_experiments(config_list):
+        """ expands the parameters list according to one of these schemes:
+            grid: every list item is combined with every other list item
+            list: every n-th list item of parameter lists are combined
+        """
+        if type(config_list) == dict:
+            config_list = [config_list]
+
+        # get all options that are iteratable and build all combinations (grid) or tuples (list)
+        expanded_config_list = []
+        for config in config_list:
+            if 'grid' in config or 'list' in config:
+                if 'grid' in config:
+                    # if we want a grid then we choose the product of all parameters
+                    iter_fun = itertools.product
+                    key = 'grid'
+                else:
+                    # if we want a list then we zip the parameters together
+                    iter_fun = zip
+                    key = 'list'
+
+                # TODO add support for both list and grid
+
+                # convert list/grid dictionary into flat dictionary, where the key is a tuple of the keys and the
+                # value is the list of values
+                tuple_dict = flatten_dict_to_tuple_keys(config[key])
+                _param_names = ['.'.join(t) for t in tuple_dict]
+
+                # create a new config for each parameter setting
+                for values in iter_fun(*tuple_dict.values()):
+                    # create config file for
+                    _config = deepcopy(config)
+                    del _config[key]
+
+                    _converted_name = '_'.join("{}{}".format(k, v) for k, v in zip(_param_names, values))
+                    _converted_name = re.sub("[' \[\],()]", '', _converted_name)
+                    _config['path'] = os.path.join(config['path'], _converted_name)
+                    _config['name'] += '_' + _converted_name
+                    # if 'log_path' in config:
+                    #     _config['log_path'] = os.path.join(config['log_path'], config['name'], _converted_name, 'log')
+                    # else:
+                    #     _config['log_path'] = os.path.join(_config['path'], 'log')
+                    for i, t in enumerate(tuple_dict.keys()):
+                        insert_deep_dictionary(_config['params'], t, values[i])
+                    expanded_config_list.append(_config)
+            else:
+                expanded_config_list.append(config)
+
+        return expanded_config_list
 
     @classmethod
     def __init_experiments(cls, config_file, experiments=None, delete_old=False, ignore_config_for_skip=False,
@@ -279,7 +360,7 @@ class ClusterWork(object):
         """initializes the experiment by loading the configuration file and creating the directory structure.
         :return:
         """
-        expanded_experiments = cls.__load_experiments(config_file, experiments)
+        expanded_experiments = cls.load_experiments(config_file, experiments)
 
         # check for finished experiments
         skip_experiments = []
@@ -394,7 +475,7 @@ class ClusterWork(object):
                                                                         socket.gethostname(),
                                                                         exp_config['name'], r))
 
-            repetition_results = cls().__run_rep(exp_config, r)
+            repetition_results = cls().__init_rep(exp_config, r).__run_rep(exp_config, r)
             gc.collect()
 
             return repetition_results
@@ -437,6 +518,20 @@ class ClusterWork(object):
                 _logger.warning("[rank {}] [{}] no results available for <{}>".format(job_stream.inline.getRank(),
                                                                                       socket.gethostname(),
                                                                                       store.config['name']))
+
+    @classmethod
+    def init_from_config(cls, config, rep=0, it=0):
+        instance = cls().__init_rep(config, 0)
+        instance.restore_state(config, rep, it)
+        instance._it = it
+
+        def exception_stub(c, r, i):
+            raise Exception('Experiment not properly initialized. Cannot run.')
+
+        instance.iterate = exception_stub
+        instance.reset = exception_stub
+
+        return instance
 
     @classmethod
     def run(cls):
@@ -488,7 +583,6 @@ class ClusterWork(object):
 
                 # w.run()
         else:
-            cls._MP_CONTEXT = 'fork'
             _logger.info("starting {} with the following options:".format(cls.__name__))
             for option, value in vars(options).items():
                 _logger.info("  - {}: {}".format(option, value))
@@ -509,7 +603,7 @@ class ClusterWork(object):
                 results = dict()
                 for repetition in repetitions_list:
                     _logger.info("running repetition {}".format(repetition[1]))
-                    result = cls().__run_rep(*repetition)
+                    result = cls().__init_rep(*repetition).__run_rep(*repetition)
                     results[repetition[1]] = result
                     gc.collect()
 
@@ -528,67 +622,7 @@ class ClusterWork(object):
                     with open(os.path.join(experiment['path'], 'results.csv'), 'w') as results_file:
                         result_frame.to_csv(results_file, **cls._pandas_to_csv_options)
 
-    @classmethod
-    def __show_progress(cls, config_file, experiment_selectors=None, full_progress=False):
-        """ shows the progress of all experiments defined in the config_file.
-        """
-        experiments_config = cls.__load_experiments(config_file, experiment_selectors)
-        total_progress = .0
-
-        for config in experiments_config:
-            exp_progress, rep_progress = cls.__experiment_progress(config)
-            total_progress += exp_progress / len(experiments_config)
-
-            # progress bar
-            bar = "["
-            bar += "=" * round(25 * exp_progress)
-            bar += " " * (25 - round(25 * exp_progress))
-            bar += "]"
-            print('{:5.1f}% {:27} {}'.format(exp_progress * 100, bar, config['name']))
-            # print('%3.1f%% %27s %s' % (exp_progress * 100, bar, config['name']))
-
-            if full_progress:
-                for i, p in enumerate(rep_progress):
-                    bar = "["
-                    bar += "=" * round(25 * p)
-                    bar += " " * (25 - round(25 * p))
-                    bar += "]"
-                    print('    |- {:2d} {:5.1f}% {:27}'.format(i, p * 100, bar))
-
-                try:
-                    minfile = min(
-                        [os.path.join(dirname, filename) for dirname, dirnames, filenames in os.walk(config['path'])
-                         for filename in filenames if filename.endswith(('.csv', '.yml'))],
-                        key=lambda fn: os.stat(fn).st_mtime)
-
-                    maxfile = max(
-                        [os.path.join(dirname, filename) for dirname, dirnames, filenames in os.walk(config['path'])
-                         for filename in filenames if filename.endswith(('.csv', '.yml'))],
-                        key=lambda fn: os.stat(fn).st_mtime)
-                except ValueError:
-                    print('         started %s' % 'not yet')
-
-                else:
-                    print('         started %s' % time.strftime('%Y-%m-%d %H:%M:%S',
-                                                                time.localtime(os.stat(minfile).st_mtime)))
-                    print('           ended %s' % time.strftime('%Y-%m-%d %H:%M:%S',
-                                                                time.localtime(os.stat(maxfile).st_mtime)))
-
-                for k in ['repetitions', 'iterations']:
-                    print('%16s %s' % (k, config[k]))
-
-                print()
-
-        print()
-
-        # print total progress
-        bar = "["
-        bar += "=" * round(50 * total_progress)
-        bar += " " * (50 - round(50 * total_progress))
-        bar += "]"
-        print('  Total: {:5.1f}% {:52}\n'.format(total_progress * 100, bar))
-
-    def __run_rep(self, config, rep) -> pd.DataFrame:
+    def __init_rep(self, config, rep):
         """ run a single repetition including directory creation, log files, etc. """
         # set configuration of this repetition
         self._name = config['name']
@@ -606,6 +640,11 @@ class ClusterWork(object):
         self._params = config['params']
         self._rep = rep
 
+        self.reset(config, rep)
+
+        return self
+
+    def __run_rep(self, config, rep) -> pd.DataFrame:
         log_filename = os.path.join(self._log_path, 'rep_{}.csv'.format(rep))
 
         # check if log-file for repetition exists
@@ -617,8 +656,6 @@ class ClusterWork(object):
                          'Skipping...'.format(rep, config['name']))
             return results
 
-        self.reset(config, rep)
-
         # if not completed but some iterations have finished, check for restart capabilities
         if self._restore_supported and n_finished_its > 0 and not self._RESTART_FULL_REPETITIONS:
             _logger.info('Repetition {} of experiment {} has started before. '
@@ -626,7 +663,7 @@ class ClusterWork(object):
             # set start for iterations and restore state in subclass
             start_iteration = n_finished_its
             try:
-                if self.restore_state(config, rep, start_iteration):
+                if self.restore_state(config, rep, start_iteration-1):
                     _logger.info('Restoring iteration succeeded. Restarting from iteration {}.'.format(n_finished_its))
                     results = pd.DataFrame(data=results,
                                            index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
@@ -699,60 +736,50 @@ class ClusterWork(object):
 
         return results
 
-    @staticmethod
-    def __expand_param_list(config_list):
-        """ expands the parameters list according to one of these schemes:
-            grid: every list item is combined with every other list item
-            list: every n-th list item of parameter lists are combined
+    @classmethod
+    def get_progress(cls, config_file, experiment_selectors=None) -> Tuple[float, List[Tuple[str, float, List[float]]]]:
+        experiments_config = cls.load_experiments(config_file, experiment_selectors)
+        total_progress = .0
+        experiment_progress = []
+
+        for config in experiments_config:
+            exp_progress, rep_progress = cls.__experiment_progress(config)
+            total_progress += exp_progress / len(experiments_config)
+            experiment_progress.append((config['name'], exp_progress, rep_progress))
+
+        return total_progress, experiment_progress
+
+    @classmethod
+    def __show_progress(cls, config_file, experiment_selectors=None, full_progress=False):
+        """ shows the progress of all experiments defined in the config_file.
         """
-        # for one single experiment, still wrap it in list
-        if type(config_list) == dict:
-            config_list = [config_list]
+        total_progress, experiments_progress = cls.get_progress(config_file, experiment_selectors)
 
-        # get all options that are iteratable and build all combinations (grid) or tuples (list)
-        expanded_config_list = []
-        for config in config_list:
-            if 'grid' in config or 'list' in config:
-                if 'grid' in config:
-                    # if we want a grid then we choose the product of all parameters
-                    iter_fun = itertools.product
-                    key = 'grid'
-                else:
-                    # if we want a list then we zip the parameters together
-                    iter_fun = zip
-                    key = 'list'
+        for name, exp_progress, rep_progress in experiments_progress:
+            # progress bar
+            bar = "["
+            bar += "=" * round(25 * exp_progress)
+            bar += " " * (25 - round(25 * exp_progress))
+            bar += "]"
+            print('{:5.1f}% {:27} {}'.format(exp_progress * 100, bar, name))
+            # print('%3.1f%% %27s %s' % (exp_progress * 100, bar, config['name']))
 
-                # TODO add support for both list and grid
+            if full_progress:
+                for i, p in enumerate(rep_progress):
+                    bar = "["
+                    bar += "=" * round(25 * p)
+                    bar += " " * (25 - round(25 * p))
+                    bar += "]"
+                    print('    |- {:2d} {:5.1f}% {:27}'.format(i, p * 100, bar))
+                print()
+        print()
 
-                # convert list/grid dictionary into flat dictionary, where the key is a tuple of the keys and the
-                # value is the list of values
-                tuple_dict = flatten_dict_to_tuple_keys(config[key])
-                _param_names = ['.'.join(t) for t in tuple_dict]
-
-                # create a new config for each parameter setting
-                for values in iter_fun(*tuple_dict.values()):
-                    # create config file for
-                    _config = deepcopy(config)
-                    del _config[key]
-
-                    _converted_name = '_'.join("{}{}".format(k, v) for k, v in zip(_param_names, values))
-                    _converted_name = re.sub("[' \[\],()]", '', _converted_name)
-                    _config['path'] = os.path.join(config['path'], config['name'], _converted_name)
-                    _config['name'] += '_' + _converted_name
-                    if 'log_path' in config:
-                        _config['log_path'] = os.path.join(config['log_path'], config['name'], _converted_name, 'log')
-                    else:
-                        _config['log_path'] = os.path.join(_config['path'], 'log')
-                    for i, t in enumerate(tuple_dict.keys()):
-                        insert_deep_dictionary(_config['params'], t, values[i])
-                    expanded_config_list.append(_config)
-            else:
-                _config = deepcopy(config)
-                _config['path'] = os.path.join(config['path'], config['name'])
-                _config['log_path'] = os.path.join(_config['path'], 'log')
-                expanded_config_list.append(_config)
-
-        return expanded_config_list
+        # print total progress
+        bar = "["
+        bar += "=" * round(50 * total_progress)
+        bar += " " * (50 - round(50 * total_progress))
+        bar += "]"
+        print('  Total: {:5.1f}% {:52}\n'.format(total_progress * 100, bar))
 
     @staticmethod
     def __convert_param_to_dirname(param):
@@ -813,7 +840,7 @@ class ClusterWork(object):
         return False
 
     @staticmethod
-    def __load_repetition_results(config, rep):
+    def load_repetition_results(config, rep):
         rep_results_filename = os.path.join(config['log_path'], 'rep_{}.csv'.format(rep))
 
         if os.path.exists(rep_results_filename):
@@ -825,7 +852,7 @@ class ClusterWork(object):
             return None
 
     @staticmethod
-    def __load_experiment_results(config):
+    def load_experiment_results(config):
         results_filename = os.path.join(config['path'], 'results.csv')
 
         if os.path.exists(results_filename):
@@ -837,20 +864,32 @@ class ClusterWork(object):
 
     @classmethod
     def __plot_experiment_results(cls, config_file, experiment_selectors=None, experiment_filter=''):
-        experiment_configs = cls.__load_experiments(config_file, experiment_selectors)
+        experiment_configs = cls.load_experiments(config_file, experiment_selectors)
 
         def create_config_and_results_generator():
             for config in experiment_configs:
                 if experiment_filter not in config['name']:
                     continue
-                results = ClusterWork.__load_experiment_results(config)
+                results = ClusterWork.load_experiment_results(config)
                 yield config, results
 
         cls.plot_results(create_config_and_results_generator())
 
+    @classmethod
+    def iterate_config_and_results(cls, config_filename, experiment_selectors=None):
+        with open(config_filename, 'r') as config_file:
+            experiment_configs = cls.load_experiments(config_file, experiment_selectors)
+
+        def config_and_results_generator():
+            for config in experiment_configs:
+                results = ClusterWork.load_experiment_results(config)
+                yield config, results
+
+        return config_and_results_generator
+
     @staticmethod
     def __repetition_has_completed(config, rep) -> (bool, int, pd.DataFrame):
-        log_df = ClusterWork.__load_repetition_results(config, rep)
+        log_df = ClusterWork.load_repetition_results(config, rep)
 
         if log_df is None:
             return False, 0, None
@@ -866,7 +905,7 @@ class ClusterWork(object):
 
     @staticmethod
     def __repetition_progress(config, rep) -> float:
-        log_df = ClusterWork.__load_repetition_results(config, rep)
+        log_df = ClusterWork.load_repetition_results(config, rep)
         if log_df is None:
             return .0
         completed_iterations = log_df.shape[0]

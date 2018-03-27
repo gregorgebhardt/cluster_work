@@ -71,7 +71,7 @@ setup(
 
     # Alternatively, if you want to distribute just a my_module.py, uncomment
     # this:
-    py_modules=["cluster_work", "cluster_work_tools"],
+    py_modules=["cluster_work", "plot_work", "cluster_work_tools"],
 
     # List run-time dependencies here.  These will be installed by pip when
     # your project is installed. For an analysis of "install_requires" vs pip's
