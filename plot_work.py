@@ -106,12 +106,12 @@ def plot_iteration(line: str):
             else:
                 items.append(fw)
 
-    # accordion = Accordion(children=items)
-    # for i, exp in enumerate(filtered_experiments):
-    #     accordion.set_title(i, exp['name'])
-    # return accordion
+    accordion = Accordion(children=items)
+    for i, exp in enumerate(filtered_experiments):
+        accordion.set_title(i, exp['name'])
+    return accordion
 
-    return items[0]
+    # return items[0]
 
 
 def __plot_iteration_completer(ipython, event):
