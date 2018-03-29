@@ -521,7 +521,7 @@ class ClusterWork(object):
 
     @classmethod
     def init_from_config(cls, config, rep=0, it=0):
-        instance = cls().__init_rep(config, 0)
+        instance = cls().__init_rep(config, rep)
         instance.restore_state(config, rep, it)
         instance._it = it
 
