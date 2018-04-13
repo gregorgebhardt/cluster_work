@@ -18,7 +18,7 @@ from IPython.core.magic import register_line_magic
 from IPython.core.magic_arguments import magic_arguments, argument, parse_argstring
 from ipywidgets import Accordion, FloatProgress, Box, HBox, Label, Layout, Output, Widget
 
-from typing import Callable, Union
+from typing import Callable, Union, List
 from matplotlib.figure import Figure
 from pandas import DataFrame
 
@@ -31,11 +31,10 @@ __results_plot_functions = {}
 __experiment_class: ClusterWork = None
 __experiment_config = None
 __experiment_selectors = None
-__experiments: dict = None
 
 
 def register_iteration_plot_function(name: str):
-    def register_iteration_plot_function_decorator(plot_function: Callable[[ClusterWork, dict, int, int],
+    def register_iteration_plot_function_decorator(plot_function: Callable[[ClusterWork, int, int, List],
                                                                            Union[Figure, Widget]]):
         global __iteration_plot_functions
         __iteration_plot_functions[name] = plot_function
@@ -58,56 +57,75 @@ def set_experiment_class(line: str):
 
 
 @register_line_magic
+@magic_arguments()
+@argument('config', type=str)
+@argument('-e', '--experiments', nargs='*')
+@argument('-f', '--filter', nargs='*', help='filter strings that are applied on the experiment names')
 def load_experiment(line: str):
     # TODO add tab completion for file
     # read line, split at white spaces load experiments with selectors
-    splits = line.split()
-    experiment_config = splits.pop(0)
-    experiment_selectors = splits
+    args = parse_argstring(load_experiment, line)
+    # experiment_config = splits.pop(0)
+    # experiment_selectors = splits
 
     # check if experiment config exists and load experiments
-    if not os.path.exists(experiment_config):
-        raise Warning('path does not exist: {}'.format(experiment_config))
+    if not os.path.exists(args.config):
+        raise Warning('path does not exist: {}'.format(args.config))
     else:
         global __experiments, __experiment_config, __experiment_selectors
-        __experiment_config = experiment_config
-        __experiment_selectors = experiment_selectors
-        with open(experiment_config, 'r') as f:
-            __experiments = __experiment_class.load_experiments(f, experiment_selectors)
+        __experiment_config = args.config
+        __experiment_selectors = args.experiments
+
+        with open(__experiment_config, 'r') as f:
+            __experiments = __experiment_class.load_experiments(f, __experiment_selectors)
+
+        if args.filter is not None:
+            __experiments = list(filter(lambda c: all([f in c['name'] for f in args.filter]), __experiments))
+        else:
+            __experiments = __experiments
+
+        get_ipython().user_ns['experiments'] = __experiments
+
+
+@register_line_magic
+@magic_arguments()
+@argument('-r', '--repetition', type=int, help='the repetition', default=0)
+@argument('-i', '--iteration', type=int, help='the iteration to plot', default=0)
+def restore_experiment_state(line: str):
+    args = parse_argstring(restore_experiment_state, line)
+    instances = list()
+
+    with Output():
+        for exp in get_ipython().user_ns['experiments']:
+            instances.append(__experiment_class.init_from_config(exp, args.repetition, args.iteration))
+
+    get_ipython().user_ns['experiment_instances'] = instances
 
 
 @register_line_magic
 @magic_arguments()
 @argument('plotter_name', type=str, help='the name of the plotter function')
-@argument('repetition', type=int, help='the repetition')
-@argument('iteration', type=int, help='the iteration to plot')
-@argument('filter', nargs='*', help='filter strings that are applied on the experiment names')
+@argument('args', nargs='*', help='extra arguments passed to the filter function')
 def plot_iteration(line: str):
     """call a registered plotter function for the given repetition and iteration"""
     args = parse_argstring(plot_iteration, line)
 
-    if args.filter is not None:
-        filtered_experiments = list(filter(lambda c: all([f in c['name'] for f in args.filter]), __experiments))
-    else:
-        filtered_experiments = __experiments
-
     items = []
 
-    for exp in filtered_experiments:
-            learner = __experiment_class.init_from_config(exp, args.repetition, args.iteration)
-            fw = __iteration_plot_functions[args.plotter_name](learner, exp)
-            clear_output()
-            if isinstance(fw, Figure):
-                out = Output()
-                items.append(out)
-                with out:
-                    clear_output(wait=True)
-                    display(fw)
-            else:
-                items.append(fw)
+    for exp in get_ipython().user_ns['experiment_instances']:
+        fw = __iteration_plot_functions[args.plotter_name](exp, args.args)
+        clear_output()
+        if isinstance(fw, Figure):
+            out = Output()
+            items.append(out)
+            with out:
+                clear_output(wait=True)
+                display(fw)
+        else:
+            items.append(fw)
 
     accordion = Accordion(children=items)
-    for i, exp in enumerate(filtered_experiments):
+    for i, exp in enumerate(__experiments):
         accordion.set_title(i, exp['name'])
     return accordion
 
@@ -116,6 +134,11 @@ def plot_iteration(line: str):
 
 def __plot_iteration_completer(ipython, event):
     return __iteration_plot_functions.keys()
+
+
+@register_line_magic
+def plot_results(line: str):
+    pass
 
 
 def __create_exp_progress_box(name, exp_progress, rep_progress, show_full_progress=False):
