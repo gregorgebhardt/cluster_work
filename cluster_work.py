@@ -31,9 +31,15 @@ import yaml
 import logging
 
 _logging_formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
+_direct_output_formatter = logging.Formatter('%(message)s')
+_direct_output_handler = logging.StreamHandler(sys.stdout)
+_direct_output_handler.setFormatter(_direct_output_formatter)
+DIR_OUT = 200
+_direct_output_handler.addFilter(lambda lr: lr.levelno == DIR_OUT)
 _logging_std_handler = logging.StreamHandler(sys.stdout)
 _logging_std_handler.setFormatter(_logging_formatter)
 _logging_std_handler.setLevel(logging.DEBUG)
+_logging_std_handler.addFilter(lambda lr: lr.levelno != DIR_OUT)
 _logging_filtered_std_handler = logging.StreamHandler(sys.stdout)
 _logging_filtered_std_handler.setFormatter(_logging_formatter)
 _logging_filtered_std_handler.setLevel(logging.DEBUG)
@@ -41,6 +47,7 @@ _logging_filtered_std_handler.addFilter(lambda lr: lr.levelno < logging.WARNING)
 _logging_err_handler = logging.StreamHandler(sys.stderr)
 _logging_err_handler.setFormatter(_logging_formatter)
 _logging_err_handler.setLevel(logging.WARNING)
+_logging_err_handler.addFilter(lambda lr: lr.levelno != DIR_OUT)
 
 # default logging configuration: log everything up to WARNING to stdout and from WARNING upwards to stderr
 # set log-level to INFO
@@ -50,8 +57,8 @@ logging.basicConfig(level=logging.INFO, handlers=[_logging_std_handler, _logging
 _logger = logging.getLogger('cluster_work')
 _logger.addHandler(_logging_filtered_std_handler)
 _logger.addHandler(_logging_err_handler)
+_logger.addHandler(_direct_output_handler)
 _logger.propagate = False
-
 
 def deep_update(d, u):
     for k, v in u.items():
@@ -602,8 +609,21 @@ class ClusterWork(object):
 
                 results = dict()
                 for repetition in repetitions_list:
-                    _logger.info("running repetition {}".format(repetition[1]))
+                    time_start = time.perf_counter()
+                    _logger.log(DIR_OUT, '======================================================================')
+                    _logger.log(DIR_OUT, '=  Running Repetition {} '.format(repetition[1]))
+                    _logger.log(DIR_OUT, '----------------------------------------------------------------------')
                     result = cls().__init_rep(*repetition).__run_rep(*repetition)
+                    _elapsed_time = time.perf_counter() - time_start
+                    _elapsed_hours = int(_elapsed_time) // 60 ** 2
+                    _elapsed_minutes = int(_elapsed_time) // 60
+                    _elapsed_seconds = _elapsed_time % 60
+                    _logger.log(DIR_OUT, '----------------------------------------------------------------------')
+                    _logger.log(DIR_OUT, '//  Finished Repetition {}'.format(repetition[1]))
+                    _logger.log(DIR_OUT, '//  Elapsed time: {:d}h:{:d}m:{:.2f}s'.format(_elapsed_hours,
+                                                                                        _elapsed_minutes,
+                                                                                        _elapsed_seconds))
+                    _logger.log(DIR_OUT, '//////////////////////////////////////////////////////////////////////')
                     results[repetition[1]] = result
                     gc.collect()
 
@@ -687,6 +707,7 @@ class ClusterWork(object):
         file_handler = logging.FileHandler(os.path.join(self._log_path_rep, 'log.txt'), file_handler_mode)
         file_handler.setLevel(self._LOG_LEVEL)
         file_handler.setFormatter(_logging_formatter)
+        file_handler.addFilter(lambda lr: lr.levelno != DIR_OUT)
         if self.__runs_on_cluster:
             logging.root.setLevel(self._LOG_LEVEL)
             logging.root.handlers.clear()
@@ -694,25 +715,35 @@ class ClusterWork(object):
         else:
             logging.root.setLevel(self._LOG_LEVEL)
             logging.root.handlers.clear()
-            logging.root.handlers = [file_handler, _logging_filtered_std_handler, _logging_err_handler]
+            logging.root.handlers = [file_handler, _logging_filtered_std_handler, _logging_err_handler,
+                                     _direct_output_handler]
 
         for it in range(start_iteration, config['iterations']):
             self._it = it
             self._seed = self._seed_base + 1000 * rep + it
-
 
             # update iteration log directory
             self._log_path_it = os.path.join(config['log_path'], '{:02d}'.format(rep), '{:02d}'.format(it), '')
 
             # run iteration and get results
             try:
+                time_start = time.perf_counter()
+                _logger.log(DIR_OUT, '%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+                _logger.log(DIR_OUT, '%  Starting Iteration {} of Repetition {}'.format(it, rep))
+                _logger.log(DIR_OUT, '----------------------------------------------------------------------')
                 it_result = self.iterate(config, rep, it)
             except ValueError or OverflowError or ZeroDivisionError or ArithmeticError or FloatingPointError:
-            # except:
                 _logger.error('Experiment {} - Repetition {} - Iteration {}'.format(config['name'], rep, it),
                               exc_info=True)
                 self.finalize()
                 return results
+            finally:
+                _elapsed_time = time.perf_counter() - time_start
+                _logger.log(DIR_OUT, '----------------------------------------------------------------------')
+                _logger.log(DIR_OUT, '//  Finished Iteration {} of Repetition {}'.format(it, rep))
+                _elapsed_minutes, _elapsed_seconds = int(_elapsed_time) // 60, _elapsed_time % 60
+                _logger.log(DIR_OUT, '//  Elapsed time: {:d}m:{:.2f}s'.format(_elapsed_minutes, _elapsed_seconds))
+                _logger.log(DIR_OUT, '//////////////////////////////////////////////////////////////////////')
 
             flat_it_result = flatten_dict(it_result)
 
