@@ -660,6 +660,22 @@ class ClusterWork(object):
         self._params = config['params']
         self._rep = rep
 
+        # set logging handlers for current repetition
+        file_handler_mode = 'a' if start_iteration else 'w'
+        file_handler = logging.FileHandler(os.path.join(self._log_path_rep, 'log.txt'), file_handler_mode)
+        file_handler.setLevel(self._LOG_LEVEL)
+        file_handler.setFormatter(_logging_formatter)
+        file_handler.addFilter(lambda lr: lr.levelno != DIR_OUT)
+        if self.__runs_on_cluster:
+            logging.root.setLevel(self._LOG_LEVEL)
+            logging.root.handlers.clear()
+            logging.root.handlers = [file_handler, _logging_err_handler]
+        else:
+            logging.root.setLevel(self._LOG_LEVEL)
+            logging.root.handlers.clear()
+            logging.root.handlers = [file_handler, _logging_filtered_std_handler, _logging_err_handler,
+                                     _direct_output_handler]
+
         self.reset(config, rep)
 
         return self
@@ -701,22 +717,6 @@ class ClusterWork(object):
         else:
             start_iteration = 0
             results = None
-
-        # set logging handlers for current repetition
-        file_handler_mode = 'a' if start_iteration else 'w'
-        file_handler = logging.FileHandler(os.path.join(self._log_path_rep, 'log.txt'), file_handler_mode)
-        file_handler.setLevel(self._LOG_LEVEL)
-        file_handler.setFormatter(_logging_formatter)
-        file_handler.addFilter(lambda lr: lr.levelno != DIR_OUT)
-        if self.__runs_on_cluster:
-            logging.root.setLevel(self._LOG_LEVEL)
-            logging.root.handlers.clear()
-            logging.root.handlers = [file_handler, _logging_err_handler]
-        else:
-            logging.root.setLevel(self._LOG_LEVEL)
-            logging.root.handlers.clear()
-            logging.root.handlers = [file_handler, _logging_filtered_std_handler, _logging_err_handler,
-                                     _direct_output_handler]
 
         for it in range(start_iteration, config['iterations']):
             self._it = it
