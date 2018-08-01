@@ -156,6 +156,9 @@ class ClusterWork(object):
         self.__log_path_it = None
         self.__log_path_it_exists = False
 
+        self.__results = None
+        self.__completed = False
+
     @property
     def _log_path_rep(self):
         if not self.__log_path_rep_exists:
@@ -661,7 +664,41 @@ class ClusterWork(object):
         self._rep = rep
 
         # check if log-file for repetition exists
-        _, n_finished_its, _ = self.__repetition_has_completed(config, rep)
+        repetition_has_finished, n_finished_its, results = self.__repetition_has_completed(config, rep)
+
+        # skip repetition if it has finished
+        if repetition_has_finished:
+            _logger.info('Repetition {} of experiment {} has finished before. '
+                         'Skipping...'.format(rep, config['name']))
+            self.__results = results
+            self.__completed = True
+            return self
+
+        # if not completed but some iterations have finished, check for restart capabilities
+        if self._restore_supported and n_finished_its > 0 and not self._RESTART_FULL_REPETITIONS:
+            _logger.info('Repetition {} of experiment {} has started before. '
+                         'Trying to restore at iteration {}.'.format(rep, config['name'], n_finished_its))
+            # set start for iterations and restore state in subclass
+            start_iteration = n_finished_its
+            try:
+                if self.restore_state(config, rep, start_iteration - 1):
+                    _logger.info('Restoring iteration succeeded. Restarting from iteration {}.'.format(n_finished_its))
+                    self.__results = pd.DataFrame(data=results,
+                                                  index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
+                                                                                 names=['r', 'i']),
+                                                  columns=results.columns, dtype=float)
+                else:
+                    _logger.info('Restoring iteration NOT successful. Restarting from iteration 0.')
+                    self.start_iteration = 0
+                    self.__results = None
+            except:
+                _logger.error('Exception during restore_state of experiment {} in repetition {}.'
+                              'Restarting from iteration 0.'.format(config['name'], rep), exc_info=True)
+                self.start_iteration = 0
+                self.__results = None
+        else:
+            self.start_iteration = 0
+            self.__results = None
 
         # set logging handlers for current repetition
         file_handler_mode = 'a' if n_finished_its else 'w'
@@ -685,43 +722,10 @@ class ClusterWork(object):
 
     def __run_rep(self, config, rep) -> pd.DataFrame:
         log_filename = os.path.join(self._log_path, 'rep_{}.csv'.format(rep))
+        if self.__completed:
+            return self.__results
 
-        # check if log-file for repetition exists
-        repetition_has_finished, n_finished_its, results = self.__repetition_has_completed(config, rep)
-
-        # skip repetition if it has finished
-        if repetition_has_finished:
-            _logger.info('Repetition {} of experiment {} has finished before. '
-                         'Skipping...'.format(rep, config['name']))
-            return results
-
-        # if not completed but some iterations have finished, check for restart capabilities
-        if self._restore_supported and n_finished_its > 0 and not self._RESTART_FULL_REPETITIONS:
-            _logger.info('Repetition {} of experiment {} has started before. '
-                         'Trying to restore at iteration {}.'.format(rep, config['name'], n_finished_its))
-            # set start for iterations and restore state in subclass
-            start_iteration = n_finished_its
-            try:
-                if self.restore_state(config, rep, start_iteration - 1):
-                    _logger.info('Restoring iteration succeeded. Restarting from iteration {}.'.format(n_finished_its))
-                    results = pd.DataFrame(data=results,
-                                           index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
-                                                                            names=['r', 'i']),
-                                           columns=results.columns, dtype=float)
-                else:
-                    _logger.info('Restoring iteration NOT successful. Restarting from iteration 0.')
-                    start_iteration = 0
-                    results = None
-            except:
-                _logger.error('Exception during restore_state of experiment {} in repetition {}.'
-                              'Restarting from iteration 0.'.format(config['name'], rep), exc_info=True)
-                start_iteration = 0
-                results = None
-        else:
-            start_iteration = 0
-            results = None
-
-        for it in range(start_iteration, config['iterations']):
+        for it in range(self.start_iteration, config['iterations']):
             self._it = it
             self._seed = self._seed_base + 1000 * rep + it
 
@@ -739,7 +743,7 @@ class ClusterWork(object):
                 _logger.error('Experiment {} - Repetition {} - Iteration {}'.format(config['name'], rep, it),
                               exc_info=True)
                 self.finalize()
-                return results
+                return self.__results
             finally:
                 _elapsed_time = time.perf_counter() - time_start
                 _logger.log(DIR_OUT, '----------------------------------------------------------------------')
@@ -750,25 +754,25 @@ class ClusterWork(object):
 
             flat_it_result = flatten_dict(it_result)
 
-            if results is None:
-                results = pd.DataFrame(index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
-                                                                        names=['r', 'i']),
-                                       columns=flat_it_result.keys(), dtype=float)
+            if self.__results is None:
+                self.__results = pd.DataFrame(index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
+                                                                               names=['r', 'i']),
+                                              columns=flat_it_result.keys(), dtype=float)
 
-            results.loc[(rep, it)] = flat_it_result
+            self.__results.loc[(rep, it)] = flat_it_result
 
             # write first line with header
             if it == 0:
-                results.iloc[[it]].to_csv(log_filename, mode='w', header=True, **self._pandas_to_csv_options)
+                self.__results.iloc[[it]].to_csv(log_filename, mode='w', header=True, **self._pandas_to_csv_options)
             else:
-                results.iloc[[it]].to_csv(log_filename, mode='a', header=False, **self._pandas_to_csv_options)
+                self.__results.iloc[[it]].to_csv(log_filename, mode='a', header=False, **self._pandas_to_csv_options)
 
             if self._restore_supported:
                 self.save_state(config, rep, it)
 
         self.finalize()
-
-        return results
+        self.__completed = True
+        return self.__results
 
     @classmethod
     def get_progress(cls, config_file, experiment_selectors=None) -> Tuple[float, List[Tuple[str, float, List[float]]]]:
