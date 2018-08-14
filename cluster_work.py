@@ -663,6 +663,8 @@ class ClusterWork(object):
         self._params = config['params']
         self._rep = rep
 
+        self.reset(config, rep)
+
         # check if log-file for repetition exists
         repetition_has_finished, n_finished_its, results = self.__repetition_has_completed(config, rep)
 
@@ -679,9 +681,9 @@ class ClusterWork(object):
             _logger.info('Repetition {} of experiment {} has started before. '
                          'Trying to restore at iteration {}.'.format(rep, config['name'], n_finished_its))
             # set start for iterations and restore state in subclass
-            start_iteration = n_finished_its
+            self.start_iteration = n_finished_its
             try:
-                if self.restore_state(config, rep, start_iteration - 1):
+                if self.restore_state(config, rep, self.start_iteration - 1):
                     _logger.info('Restoring iteration succeeded. Restarting from iteration {}.'.format(n_finished_its))
                     self.__results = pd.DataFrame(data=results,
                                                   index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
@@ -715,8 +717,6 @@ class ClusterWork(object):
             logging.root.handlers.clear()
             logging.root.handlers = [file_handler, _logging_filtered_std_handler, _logging_err_handler,
                                      _direct_output_handler]
-
-        self.reset(config, rep)
 
         return self
 
