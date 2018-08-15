@@ -667,7 +667,7 @@ class ClusterWork(object):
         repetition_has_finished, n_finished_its, results = self.__repetition_has_completed(config, rep)
 
         # skip repetition if it has finished
-        if repetition_has_finished:
+        if repetition_has_finished or n_finished_its == config['iterations']:
             _logger.info('Repetition {} of experiment {} has finished before. '
                          'Skipping...'.format(rep, config['name']))
             self.__results = results
