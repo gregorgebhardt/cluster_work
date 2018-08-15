@@ -663,8 +663,6 @@ class ClusterWork(object):
         self._params = config['params']
         self._rep = rep
 
-        self.reset(config, rep)
-
         # check if log-file for repetition exists
         repetition_has_finished, n_finished_its, results = self.__repetition_has_completed(config, rep)
 
@@ -675,6 +673,8 @@ class ClusterWork(object):
             self.__results = results
             self.__completed = True
             return self
+
+        self.reset(config, rep)
 
         # if not completed but some iterations have finished, check for restart capabilities
         if self._restore_supported and n_finished_its > 0 and not self._RESTART_FULL_REPETITIONS:
@@ -986,3 +986,44 @@ class IncompleteConfigurationError(Exception):
 
 class InvalidParameterArgument(Exception):
     pass
+
+
+class StreamLogger:
+    class LoggerWriter:
+        def __init__(self, logger: logging.Logger, level: logging.DEBUG):
+            # self.level is really like using log.debug(message)
+            # at least in my case
+            self.logger = logger
+            self.level = level
+
+        def write(self, message):
+            # if statement reduces the amount of newlines that are
+            # printed to the logger
+            if message.strip() is not '':
+                self.logger.log(self.level, message)
+
+        def flush(self):
+            # create a flush method so things can be flushed when
+            # the system wants to. Not sure if simply 'printing'
+            # sys.stderr is the correct way to do it, but it seemed
+            # to work properly for me.
+            # self.level(sys.stderr)
+            pass
+
+    def __init__(self, logger, stdout_level=logging.INFO, stderr_level=logging.WARNING):
+        self.logger = logger
+        self.stdout_level = stdout_level
+        self.stderr_level = stderr_level
+
+        self.old_stdout = None
+        self.old_stderr = None
+
+    def __enter__(self):
+        self.old_stdout = sys.stdout
+        self.old_stderr = sys.stderr
+        sys.stdout = self.LoggerWriter(self.logger, self.stdout_level)
+        sys.stderr = self.LoggerWriter(self.logger, self.stderr_level)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout = self.old_stdout
+        sys.stderr = self.old_stderr
