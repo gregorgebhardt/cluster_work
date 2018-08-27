@@ -619,7 +619,7 @@ class ClusterWork(object):
                     result = cls().__init_rep(*repetition).__run_rep(*repetition)
                     _elapsed_time = time.perf_counter() - time_start
                     _elapsed_hours = int(_elapsed_time) // 60 ** 2
-                    _elapsed_minutes = int(_elapsed_time) // 60
+                    _elapsed_minutes = (int(_elapsed_time) // 60) % 60
                     _elapsed_seconds = _elapsed_time % 60
                     _logger.log(DIR_OUT, '----------------------------------------------------------------------')
                     _logger.log(DIR_OUT, '//  Finished Repetition {}'.format(repetition[1]))
@@ -744,6 +744,9 @@ class ClusterWork(object):
                               exc_info=True)
                 self.finalize()
                 return self.__results
+            except:
+                self.finalize()
+                raise
             finally:
                 _elapsed_time = time.perf_counter() - time_start
                 _logger.log(DIR_OUT, '----------------------------------------------------------------------')
