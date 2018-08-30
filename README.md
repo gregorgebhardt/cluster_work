@@ -1,20 +1,26 @@
 # ClusterWork
 
 A framework to easily deploy experiments on an computing cluster with mpi. 
-ClusterWork is based on the [Python Experiment Suite](https://github.com/rueckstiess/expsuite) by Thomas Rückstiess and uses the [job_stream](https://wwoods.github.io/job_stream/) package to distribute the work.
+**ClusterWork** is based on the [Python Experiment Suite](https://github.com/rueckstiess/expsuite) by Thomas Rückstiess and uses the [job_stream](https://wwoods.github.io/job_stream/) package to distribute the work.
 
 ## Installation
 
 0. Creating a virtual environment with [virtualenv](https://virtualenv.pypa.io/en/stable/) or [conda](https://conda.io/miniconda.html) is recommended. For the installation this virtual environment has to be activated first.
 1. Install required packages
-    1. job_stream requires [boost](http://www.boost.org/) (filesystem, mpi, python, regex, serialization, system, thread) and mpi (e.g., [OpenMPI](http://www.open-mpi.org/))
-    ```sh
-    sudo apt-get install libboost-dev libopenmpi-dev
-    ```
-    2. ClusterWork requires the Python packages PyYAML, job_stream and pandas
-    ```sh
-    pip install PyYAML job_stream pandas
-    ```
+    1. [job_stream](https://wwoods.github.io/job_stream/) requires [boost](http://www.boost.org/) (filesystem, mpi, python, regex, serialization, system, thread) and mpi (e.g., [OpenMPI](http://www.open-mpi.org/))
+       ```sh
+       sudo apt-get install libboost-dev libopenmpi-dev
+       ```
+       In case, you have created a conda environment, both can also be installed in the environment as
+       ```bash
+       conda install boost mpi4py
+       ```
+       Currently, you need to manually fix a bug in a boost header, see [here](https://github.com/wwoods/job_stream/issues/1). 
+    2. **ClusterWork** requires the Python packages PyYAML, job_stream and pandas
+       ```sh
+       pip install PyYAML job_stream pandas
+       ```
+       However, they should be automatically installed when installying **ClusterWork**
 2. Clone this repository and install it
 ```sh
 git clone https://github.com/gregorgebhardt/cluster_work cluster_work
@@ -26,11 +32,11 @@ pip install .
 Running your code on the computing cluster is now a very simple task. 
 Currently, this requires the following three steps:
 
-1. Write a Python class that inherits from `ClusterWork` and implements at least the methods `reset(self, config: dict, rep: int)` and `iterate(self, config: dict, rep: int, n: int)`.
+1. Write a Python class that inherits from **ClusterWork** and implements at least the methods `reset(self, config: dict, rep: int)` and `iterate(self, config: dict, rep: int, n: int)`.
 2. Write a simple YAML-file to configure your experiment. 
 3. Adopt a shell script that starts the experiment on your cluster.
 
-### Subclassing `ClusterWork`
+### Subclassing ClusterWork
 
 ```Python
 from cluster_work import ClusterWork
@@ -55,7 +61,7 @@ if __name__ == '__main__':
 
 #### Restarting your experiments
 
-ClusterWork also implement a restart functionality. Since your results are stored after each iteration, your experiment can be restarted if its execution was interrupted for some reason. To obtain this functionality, you need to implement in addition at least the method `restore_state(self, config: dict, rep: int, n: int)`. Additionally, the method `save_state(self, config: dict, rep: int, n: int)` can be implemented to store additional information the needs to be loaded in the `restore_state` method. Finally, a flag `_restore_supported` must be set to `True`.
+**ClusterWork** also implement a restart functionality. Since your results are stored after each iteration, your experiment can be restarted if its execution was interrupted for some reason. To obtain this functionality, you need to implement in addition at least the method `restore_state(self, config: dict, rep: int, n: int)`. Additionally, the method `save_state(self, config: dict, rep: int, n: int)` can be implemented to store additional information the needs to be loaded in the `restore_state` method. Finally, a flag `_restore_supported` must be set to `True`.
 
 ```Python
 class MyExperiment(ClusterWork):
@@ -101,10 +107,9 @@ class MyExperiment(ClusterWork):
 
 To configure the execution of the experiment, we need to write a small YAML-file. The YAML file consists several documents which are separated by a line of `---`. Optionally, the first document can be made a default by setting the key `name` to `"DEFAULT"`. This default document will then form the basis for all following experiment documents. Besides the optional default document, each document represents an experiment. However, experiments can be expanded by the _list_ __or__ _grid_ feature, which is explained below.
 
-The required keys for each experiment are `name`, `repetitions`, `iterations`, and `path`. The parameters found below the key `params` overwrite the default parameters defined in the experiment class. Since the `config` dictionary that is passed to the methods of the ClusterWork subclass is the full configuration generated from the YAML-file and the default parameters, additional keys can be used.
+The required keys for each experiment are `name`, `repetitions`, `iterations`, and `path`. The parameters found below the key `params` overwrite the default parameters defined in the experiment class. Since the `config` dictionary that is passed to the methods of the **ClusterWork** subclass is the full configuration generated from the YAML-file and the default parameters, additional keys can be used.
 
-```YAML
----
+```
 # default document denoted by the name "DEFAULT"
 name: "DEFAULT"
 repetitions: 20
@@ -206,4 +211,4 @@ srun hostname > hostfile.$SLURM_JOB_ID
 hostfileconv hostfile.$SLURM_JOB_ID
 ```
 
-where `hostfileconv` is a tool provided by ClusterWork that makes sure the hostfile has the right format. In this case the `HOSTFILE` argument for job_stream would be `hostfile.$SLURM_JOB_ID.converted`. 
+where `hostfileconv` is a tool provided by **ClusterWork** that makes sure the hostfile has the right format. In this case the `HOSTFILE` argument for job_stream would be `hostfile.$SLURM_JOB_ID.converted`. 

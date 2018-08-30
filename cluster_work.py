@@ -552,6 +552,8 @@ class ClusterWork(object):
         cls._VERBOSE = options.verbose
         cls._LOG_LEVEL = options.log_level.upper()
         cls._RESTART_FULL_REPETITIONS = options.restart_full_repetitions
+
+        logging.root.setLevel(cls._LOG_LEVEL)
         _logging_filtered_std_handler.setLevel(level=cls._LOG_LEVEL)
         _logging_std_handler.setLevel(level=cls._LOG_LEVEL)
         if cls._VERBOSE:
@@ -709,11 +711,9 @@ class ClusterWork(object):
         file_handler.setFormatter(_logging_formatter)
         file_handler.addFilter(lambda lr: lr.levelno != DIR_OUT)
         if self.__runs_on_cluster:
-            logging.root.setLevel(self._LOG_LEVEL)
             logging.root.handlers.clear()
             logging.root.handlers = [file_handler, _logging_err_handler]
         else:
-            logging.root.setLevel(self._LOG_LEVEL)
             logging.root.handlers.clear()
             logging.root.handlers = [file_handler, _logging_filtered_std_handler, _logging_err_handler,
                                      _direct_output_handler]
@@ -770,8 +770,7 @@ class ClusterWork(object):
             else:
                 self.__results.iloc[[it]].to_csv(log_filename, mode='a', header=False, **self._pandas_to_csv_options)
 
-            if self._restore_supported:
-                self.save_state(config, rep, it)
+            self.save_state(config, rep, it)
 
         self.finalize()
         self.__completed = True
