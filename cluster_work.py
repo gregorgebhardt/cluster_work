@@ -31,7 +31,7 @@ import yaml
 import logging
 
 _logging_formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
-_direct_output_formatter = logging.Formatter('%(message)s')
+_direct_output_formatter = logging.Formatter('[%(asctime)s] %(message)s')
 _direct_output_handler = logging.StreamHandler(sys.stdout)
 _direct_output_handler.setFormatter(_direct_output_formatter)
 DIR_OUT = 200
@@ -428,8 +428,12 @@ class ClusterWork(object):
 
     @classmethod
     def __setup_work_flow(cls, work):
-        import job_stream.common
-        import job_stream.inline
+        try:
+            import job_stream.common
+            import job_stream.inline
+        except ModuleNotFoundError:
+            print('ClusterWork requires the job_stream package for distribution jobs via MPI.')
+            raise
 
         @work.init
         def _work_init():
@@ -576,9 +580,14 @@ class ClusterWork(object):
             return
 
         if options.cluster:
-            import job_stream.common
-            import job_stream.inline
+            try:
+                import job_stream.common
+                import job_stream.inline
+            except ModuleNotFoundError:
+                print('ClusterWork requires the job_stream package for distribution jobs via MPI.')
+                raise
             cls.__runs_on_cluster = True
+            _logger.debug('Setting multiprocessing context to \'forkserver\'.')
             cls._MP_CONTEXT = 'forkserver'
 
             if job_stream.common.getRank() == 0:
@@ -615,20 +624,20 @@ class ClusterWork(object):
                 results = dict()
                 for repetition in repetitions_list:
                     time_start = time.perf_counter()
-                    _logger.log(DIR_OUT, '======================================================================')
-                    _logger.log(DIR_OUT, '=  Running Repetition {} '.format(repetition[1]))
-                    _logger.log(DIR_OUT, '----------------------------------------------------------------------')
+                    _logger.log(DIR_OUT, '====================================================')
+                    _logger.log(DIR_OUT, '>  Running Repetition {} '.format(repetition[1] + 1))
+                    _logger.log(DIR_OUT, '----------------------------------------------------')
                     result = cls().__init_rep(*repetition).__run_rep(*repetition)
                     _elapsed_time = time.perf_counter() - time_start
                     _elapsed_hours = int(_elapsed_time) // 60 ** 2
                     _elapsed_minutes = (int(_elapsed_time) // 60) % 60
                     _elapsed_seconds = _elapsed_time % 60
-                    _logger.log(DIR_OUT, '----------------------------------------------------------------------')
-                    _logger.log(DIR_OUT, '//  Finished Repetition {}'.format(repetition[1]))
-                    _logger.log(DIR_OUT, '//  Elapsed time: {:d}h:{:d}m:{:.2f}s'.format(_elapsed_hours,
+                    _logger.log(DIR_OUT, '----------------------------------------------------')
+                    _logger.log(DIR_OUT, '>  Finished Repetition {}'.format(repetition[1] + 1))
+                    _logger.log(DIR_OUT, '>  Elapsed time: {:d}h:{:d}m:{:.2f}s'.format(_elapsed_hours,
                                                                                         _elapsed_minutes,
                                                                                         _elapsed_seconds))
-                    _logger.log(DIR_OUT, '//////////////////////////////////////////////////////////////////////')
+                    _logger.log(DIR_OUT, '////////////////////////////////////////////////////')
                     results[repetition[1]] = result
                     gc.collect()
 
@@ -671,7 +680,7 @@ class ClusterWork(object):
         # skip repetition if it has finished
         if repetition_has_finished or n_finished_its == config['iterations']:
             _logger.info('Repetition {} of experiment {} has finished before. '
-                         'Skipping...'.format(rep, config['name']))
+                         'Skipping...'.format(rep + 1, config['name']))
             self.__results = results
             self.__completed = True
             return self
@@ -681,23 +690,24 @@ class ClusterWork(object):
         # if not completed but some iterations have finished, check for restart capabilities
         if self._restore_supported and n_finished_its > 0 and not self._RESTART_FULL_REPETITIONS:
             _logger.info('Repetition {} of experiment {} has started before. '
-                         'Trying to restore at iteration {}.'.format(rep, config['name'], n_finished_its))
+                         'Trying to restore state after iteration {}.'.format(rep + 1, config['name'], n_finished_its))
             # set start for iterations and restore state in subclass
             self.start_iteration = n_finished_its
             try:
+                self._log_path_it = os.path.join(config['log_path'], '{:02d}'.format(rep), '{:02d}'.format(n_finished_its - 1), '')
                 if self.restore_state(config, rep, self.start_iteration - 1):
-                    _logger.info('Restoring iteration succeeded. Restarting from iteration {}.'.format(n_finished_its))
+                    _logger.info('Restoring iteration succeeded. Restarting after iteration {}.'.format(n_finished_its))
                     self.__results = pd.DataFrame(data=results,
                                                   index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
                                                                                  names=['r', 'i']),
                                                   columns=results.columns, dtype=float)
                 else:
-                    _logger.info('Restoring iteration NOT successful. Restarting from iteration 0.')
+                    _logger.info('Restoring iteration NOT successful. Restarting from iteration 1.')
                     self.start_iteration = 0
                     self.__results = None
             except:
                 _logger.error('Exception during restore_state of experiment {} in repetition {}.'
-                              'Restarting from iteration 0.'.format(config['name'], rep), exc_info=True)
+                              'Restarting from iteration 1.'.format(config['name'], rep + 1), exc_info=True)
                 self.start_iteration = 0
                 self.__results = None
         else:
@@ -735,12 +745,30 @@ class ClusterWork(object):
             # run iteration and get results
             try:
                 time_start = time.perf_counter()
-                _logger.log(DIR_OUT, '%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-                _logger.log(DIR_OUT, '%  Starting Iteration {} of Repetition {}'.format(it, rep))
-                _logger.log(DIR_OUT, '----------------------------------------------------------------------')
+                _logger.log(DIR_OUT, '----------------------------------------------------')
+                _logger.log(DIR_OUT, '>  Starting Iteration {} of Repetition {}'.format(it + 1, rep + 1))
+                _logger.log(DIR_OUT, '----------------------------------------------------')
                 it_result = self.iterate(config, rep, it)
+
+                flat_it_result = flatten_dict(it_result)
+
+                if self.__results is None:
+                    self.__results = pd.DataFrame(index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
+                                                                                   names=['r', 'i']),
+                                                  columns=flat_it_result.keys(), dtype=float)
+
+                self.__results.loc[(rep, it)] = flat_it_result
+
+                # write first line with header
+                if it == 0:
+                    self.__results.iloc[[it]].to_csv(log_filename, mode='w', header=True, **self._pandas_to_csv_options)
+                else:
+                    self.__results.iloc[[it]].to_csv(log_filename, mode='a', header=False,
+                                                     **self._pandas_to_csv_options)
+
+                self.save_state(config, rep, it)
             except ValueError or OverflowError or ZeroDivisionError or ArithmeticError or FloatingPointError:
-                _logger.error('Experiment {} - Repetition {} - Iteration {}'.format(config['name'], rep, it),
+                _logger.error('Experiment {} - Repetition {} - Iteration {}'.format(config['name'], rep + 1, it + 1),
                               exc_info=True)
                 self.finalize()
                 return self.__results
@@ -749,28 +777,11 @@ class ClusterWork(object):
                 raise
             finally:
                 _elapsed_time = time.perf_counter() - time_start
-                _logger.log(DIR_OUT, '----------------------------------------------------------------------')
-                _logger.log(DIR_OUT, '//  Finished Iteration {} of Repetition {}'.format(it, rep))
+                _logger.log(DIR_OUT, '----------------------------------------------------')
+                _logger.log(DIR_OUT, '>  Finished Iteration {} of Repetition {}'.format(it + 1, rep + 1))
                 _elapsed_minutes, _elapsed_seconds = int(_elapsed_time) // 60, _elapsed_time % 60
-                _logger.log(DIR_OUT, '//  Elapsed time: {:d}m:{:.2f}s'.format(_elapsed_minutes, _elapsed_seconds))
-                _logger.log(DIR_OUT, '//////////////////////////////////////////////////////////////////////')
-
-            flat_it_result = flatten_dict(it_result)
-
-            if self.__results is None:
-                self.__results = pd.DataFrame(index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
-                                                                               names=['r', 'i']),
-                                              columns=flat_it_result.keys(), dtype=float)
-
-            self.__results.loc[(rep, it)] = flat_it_result
-
-            # write first line with header
-            if it == 0:
-                self.__results.iloc[[it]].to_csv(log_filename, mode='w', header=True, **self._pandas_to_csv_options)
-            else:
-                self.__results.iloc[[it]].to_csv(log_filename, mode='a', header=False, **self._pandas_to_csv_options)
-
-            self.save_state(config, rep, it)
+                _logger.log(DIR_OUT, '>  Elapsed time: {:d}m:{:.2f}s'.format(_elapsed_minutes, _elapsed_seconds))
+                _logger.log(DIR_OUT, '----------------------------------------------------')
 
         self.finalize()
         self.__completed = True
@@ -798,7 +809,7 @@ class ClusterWork(object):
         for name, exp_progress, rep_progress in experiments_progress:
             # progress bar
             bar = "["
-            bar += "=" * round(25 * exp_progress)
+            bar += "#" * round(25 * exp_progress)
             bar += " " * (25 - round(25 * exp_progress))
             bar += "]"
             print('{:5.1f}% {:27} {}'.format(exp_progress * 100, bar, name))
@@ -807,16 +818,16 @@ class ClusterWork(object):
             if full_progress:
                 for i, p in enumerate(rep_progress):
                     bar = "["
-                    bar += "=" * round(25 * p)
+                    bar += "#" * round(25 * p)
                     bar += " " * (25 - round(25 * p))
                     bar += "]"
-                    print('    |- {:2d} {:5.1f}% {:27}'.format(i, p * 100, bar))
+                    print('    |- {:2d} {:5.1f}% {:27}'.format(i+1, p * 100, bar))
                 print()
         print()
 
         # print total progress
         bar = "["
-        bar += "=" * round(50 * total_progress)
+        bar += "%" * round(50 * total_progress)
         bar += " " * (50 - round(50 * total_progress))
         bar += "]"
         print('  Total: {:5.1f}% {:52}\n'.format(total_progress * 100, bar))
