@@ -20,6 +20,7 @@ from ipywidgets import Accordion, FloatProgress, Box, HBox, Label, Layout, Outpu
 
 from typing import Callable, Union, List
 from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
 from pandas import DataFrame
 
 import os
@@ -43,7 +44,7 @@ def register_iteration_plot_function(name: str):
 
 
 def register_results_plot_function(name: str):
-    def register_results_plot_function_decorator(plot_function: Callable[[DataFrame], Union[Figure, Widget]]):
+    def register_results_plot_function_decorator(plot_function: Callable[[str, DataFrame, plt.Axes], None]):
         global __results_plot_functions
         __results_plot_functions[name] = plot_function
         return plot_function
@@ -116,7 +117,7 @@ def plot_iteration(line: str):
         fw = __iteration_plot_functions[args.plotter_name](exp, args.args)
         clear_output()
         if isinstance(fw, Figure):
-            out = Output()
+            out = Output(fw)
             items.append(out)
             with out:
                 clear_output(wait=True)
@@ -127,9 +128,9 @@ def plot_iteration(line: str):
     accordion = Accordion(children=items)
     for i, exp in enumerate(__experiments):
         accordion.set_title(i, exp['name'])
-    return accordion
+    display(accordion)
 
-    # return items[0]
+    # return items
 
 
 def __plot_iteration_completer(ipython, event):
@@ -137,8 +138,29 @@ def __plot_iteration_completer(ipython, event):
 
 
 @register_line_magic
+@magic_arguments()
+@argument('plotter_name', type=str, help='the name of the plotter function')
+@argument('column', type=str, help='column of the results DataFrame to plot')
+@argument('-i', '--individual', action='store_true', help='plot each experiment in a single axes object')
 def plot_results(line: str):
-    pass
+    args = parse_argstring(plot_results, line)
+
+    items = []
+
+    # global __experiments, __results_plot_functions
+    config_results = [(config, ClusterWork.load_experiment_results(config)) for config in __experiments]
+    config_results = list(map(lambda t: (t[0], t[1][args.column]), filter(lambda t: t[1] is not None, config_results)))
+
+    f = plt.figure()
+    if args.individual:
+        axes = f.subplots(len(config_results), 1)
+    else:
+        axes = [f.subplots(1,1)] * len(config_results)
+
+    for config_result, ax in zip(config_results, axes):
+        config, result = config_result
+        ax.set_xlim(0, config['iterations'])
+        __results_plot_functions[args.plotter_name](config['name'], result, ax)
 
 
 def __create_exp_progress_box(name, exp_progress, rep_progress, show_full_progress=False):

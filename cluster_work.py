@@ -31,23 +31,31 @@ import yaml
 import logging
 
 _logging_formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
-_direct_output_formatter = logging.Formatter('[%(asctime)s] %(message)s')
-_direct_output_handler = logging.StreamHandler(sys.stdout)
-_direct_output_handler.setFormatter(_direct_output_formatter)
-DIR_OUT = 200
-_direct_output_handler.addFilter(lambda lr: lr.levelno == DIR_OUT)
+
+_info_output_formatter = logging.Formatter('[%(asctime)s] %(message)s')
+_info_content_output_handler = logging.StreamHandler(sys.stdout)
+_info_content_output_handler.setFormatter(_info_output_formatter)
+_info_border_output_handler = logging.StreamHandler(sys.stdout)
+_info_border_output_handler.setFormatter(_info_output_formatter)
+INFO_CONTNT = 200
+INFO_BORDER = 150
+_info_content_output_handler.setLevel(INFO_CONTNT)
+_info_border_output_handler.setLevel(INFO_BORDER)
+
 _logging_std_handler = logging.StreamHandler(sys.stdout)
 _logging_std_handler.setFormatter(_logging_formatter)
 _logging_std_handler.setLevel(logging.DEBUG)
-_logging_std_handler.addFilter(lambda lr: lr.levelno != DIR_OUT)
+_logging_std_handler.addFilter(lambda lr: lr.levelno <= logging.ERROR)
+
 _logging_filtered_std_handler = logging.StreamHandler(sys.stdout)
 _logging_filtered_std_handler.setFormatter(_logging_formatter)
 _logging_filtered_std_handler.setLevel(logging.DEBUG)
 _logging_filtered_std_handler.addFilter(lambda lr: lr.levelno < logging.WARNING)
+
 _logging_err_handler = logging.StreamHandler(sys.stderr)
 _logging_err_handler.setFormatter(_logging_formatter)
 _logging_err_handler.setLevel(logging.WARNING)
-_logging_err_handler.addFilter(lambda lr: lr.levelno != DIR_OUT)
+_logging_err_handler.addFilter(lambda lr: lr.levelno <= logging.ERROR)
 
 # default logging configuration: log everything up to WARNING to stdout and from WARNING upwards to stderr
 # set log-level to INFO
@@ -57,7 +65,8 @@ logging.basicConfig(level=logging.INFO, handlers=[_logging_std_handler, _logging
 _logger = logging.getLogger('cluster_work')
 _logger.addHandler(_logging_filtered_std_handler)
 _logger.addHandler(_logging_err_handler)
-_logger.addHandler(_direct_output_handler)
+# _logger.addHandler(_info_content_output_handler)
+_logger.addHandler(_info_border_output_handler)
 _logger.propagate = False
 
 def deep_update(d, u):
@@ -282,7 +291,7 @@ class ClusterWork(object):
 
     @staticmethod
     def __adapt_experiment_path(config_list):
-        """ adapts the path of the experiment and sets the log-path
+        """ adapts the path of the experiment
         """
         # for one single experiment, still wrap it in list
         if type(config_list) == dict:
@@ -290,6 +299,7 @@ class ClusterWork(object):
 
         expanded_config_list = []
         for config in config_list:
+            config['_config_path'] = config['path']
             config['path'] = os.path.join(config['path'], config['name'])
             expanded_config_list.append(config)
 
@@ -350,7 +360,9 @@ class ClusterWork(object):
 
                     _converted_name = '_'.join("{}{}".format(k, v) for k, v in zip(_param_names, values))
                     _converted_name = re.sub("[' \[\],()]", '', _converted_name)
+                    _config['_experiment_path'] = config['path']
                     _config['path'] = os.path.join(config['path'], _converted_name)
+                    _config['experiment_name'] = _config['name']
                     _config['name'] += '_' + _converted_name
                     # if 'log_path' in config:
                     #     _config['log_path'] = os.path.join(config['log_path'], config['name'], _converted_name, 'log')
@@ -485,9 +497,9 @@ class ClusterWork(object):
             :param exp_config: the configuration document for the experiment
             :param r: the repetition number
             """
-            _logger.info('[rank {}] [{}] starting <{}> - Rep {}'.format(job_stream.getRank(),
+            _logger.debug('[rank {}] [{}] starting <{}> - Rep {}'.format(job_stream.getRank(),
                                                                         socket.gethostname(),
-                                                                        exp_config['name'], r))
+                                                                        exp_config['name'], r+1))
 
             repetition_results = cls().__init_rep(exp_config, r).__run_rep(exp_config, r)
             gc.collect()
@@ -504,7 +516,7 @@ class ClusterWork(object):
             _logger.info("[rank {}] [{}] storing results of <{}> - Rep {}".format(job_stream.inline.getRank(),
                                                                                   socket.gethostname(),
                                                                                   store.config['name'],
-                                                                                  repetition_results.index[0][0]))
+                                                                                  repetition_results.index[0][0]+1))
 
             if repetition_results is None:
                 return
@@ -535,7 +547,7 @@ class ClusterWork(object):
 
     @classmethod
     def init_from_config(cls, config, rep=0, it=0):
-        instance = cls().__init_rep(config, rep)
+        instance = cls().__init_rep_without_checks(config, rep)
         instance.restore_state(config, rep, it)
         instance._it = it
 
@@ -624,20 +636,20 @@ class ClusterWork(object):
                 results = dict()
                 for repetition in repetitions_list:
                     time_start = time.perf_counter()
-                    _logger.log(DIR_OUT, '====================================================')
-                    _logger.log(DIR_OUT, '>  Running Repetition {} '.format(repetition[1] + 1))
-                    _logger.log(DIR_OUT, '----------------------------------------------------')
+                    _logger.log(INFO_BORDER, '====================================================')
+                    _logger.log(INFO_CONTNT, '>  Running Repetition {} '.format(repetition[1] + 1))
+                    # _logger.log(DIR_OUT, '----------------------------------------------------')
                     result = cls().__init_rep(*repetition).__run_rep(*repetition)
                     _elapsed_time = time.perf_counter() - time_start
                     _elapsed_hours = int(_elapsed_time) // 60 ** 2
                     _elapsed_minutes = (int(_elapsed_time) // 60) % 60
                     _elapsed_seconds = _elapsed_time % 60
-                    _logger.log(DIR_OUT, '----------------------------------------------------')
-                    _logger.log(DIR_OUT, '>  Finished Repetition {}'.format(repetition[1] + 1))
-                    _logger.log(DIR_OUT, '>  Elapsed time: {:d}h:{:d}m:{:.2f}s'.format(_elapsed_hours,
-                                                                                        _elapsed_minutes,
-                                                                                        _elapsed_seconds))
-                    _logger.log(DIR_OUT, '////////////////////////////////////////////////////')
+                    _logger.log(INFO_BORDER, '////////////////////////////////////////////////////')
+                    _logger.log(INFO_CONTNT, '>  Finished Repetition {}'.format(repetition[1] + 1))
+                    _logger.log(INFO_CONTNT, '>  Elapsed time: {:d}h:{:d}m:{:.2f}s'.format(_elapsed_hours,
+                                                                                           _elapsed_minutes,
+                                                                                           _elapsed_seconds))
+                    # _logger.log(DIR_OUT, '////////////////////////////////////////////////////')
                     results[repetition[1]] = result
                     gc.collect()
 
@@ -719,14 +731,16 @@ class ClusterWork(object):
         file_handler = logging.FileHandler(os.path.join(self._log_path_rep, 'log.txt'), file_handler_mode)
         file_handler.setLevel(self._LOG_LEVEL)
         file_handler.setFormatter(_logging_formatter)
-        file_handler.addFilter(lambda lr: lr.levelno != DIR_OUT)
+        file_handler.addFilter(lambda lr: lr.levelno <= logging.ERROR)
         if self.__runs_on_cluster:
             logging.root.handlers.clear()
             logging.root.handlers = [file_handler, _logging_err_handler]
+            _logger.removeHandler(_info_border_output_handler)
+            _logger.addHandler(_info_content_output_handler)
         else:
             logging.root.handlers.clear()
             logging.root.handlers = [file_handler, _logging_filtered_std_handler, _logging_err_handler,
-                                     _direct_output_handler]
+                                     _info_border_output_handler]
 
         return self
 
@@ -745,9 +759,9 @@ class ClusterWork(object):
             # run iteration and get results
             try:
                 time_start = time.perf_counter()
-                _logger.log(DIR_OUT, '----------------------------------------------------')
-                _logger.log(DIR_OUT, '>  Starting Iteration {} of Repetition {}'.format(it + 1, rep + 1))
-                _logger.log(DIR_OUT, '----------------------------------------------------')
+                _logger.log(INFO_BORDER, '----------------------------------------------------')
+                _logger.log(INFO_CONTNT, '>  Starting Iteration {} of Repetition {}'.format(it + 1, rep + 1))
+                _logger.log(INFO_BORDER, '----------------------------------------------------')
                 it_result = self.iterate(config, rep, it)
 
                 flat_it_result = flatten_dict(it_result)
@@ -777,15 +791,36 @@ class ClusterWork(object):
                 raise
             finally:
                 _elapsed_time = time.perf_counter() - time_start
-                _logger.log(DIR_OUT, '----------------------------------------------------')
-                _logger.log(DIR_OUT, '>  Finished Iteration {} of Repetition {}'.format(it + 1, rep + 1))
+                _logger.log(INFO_BORDER, '----------------------------------------------------')
+                _logger.log(INFO_CONTNT, '>  Finished Iteration {} of Repetition {}'.format(it + 1, rep + 1))
                 _elapsed_minutes, _elapsed_seconds = int(_elapsed_time) // 60, _elapsed_time % 60
-                _logger.log(DIR_OUT, '>  Elapsed time: {:d}m:{:.2f}s'.format(_elapsed_minutes, _elapsed_seconds))
-                _logger.log(DIR_OUT, '----------------------------------------------------')
+                _logger.log(INFO_CONTNT, '>  Elapsed time: {:d}m:{:.2f}s'.format(_elapsed_minutes, _elapsed_seconds))
+                # _logger.log(DIR_OUT, '----------------------------------------------------')
 
         self.finalize()
         self.__completed = True
         return self.__results
+
+    def __init_rep_without_checks(self, config, rep):
+        # set configuration of this repetition
+        self._name = config['name']
+        self._repetitions = config['repetitions']
+        self._iterations = config['iterations']
+        self._path = config['path']
+        self._log_path = config['log_path']
+        self._log_path_rep = os.path.join(config['log_path'], '{:02d}'.format(rep), '')
+        self._plotting = config['plotting'] if 'plotting' in config else True
+        self._no_gui = (not config['gui'] if 'gui' in config else False) or self.__runs_on_cluster or self._NO_GUI
+        self._seed_base = zlib.adler32(self._name.encode()) % int(1e6)
+        self._seed = self._seed_base + 1000 * rep
+
+        # set params of this repetition
+        self._params = config['params']
+        self._rep = rep
+
+        self.reset(config, rep)
+
+        return self
 
     @classmethod
     def get_progress(cls, config_file, experiment_selectors=None) -> Tuple[float, List[Tuple[str, float, List[float]]]]:
@@ -911,7 +946,16 @@ class ClusterWork(object):
             results_df.set_index(keys=['r', 'i'], inplace=True)
             return results_df
         else:
-            return None
+            results_dfs = [ClusterWork.load_repetition_results(config, r) for r in range(config['repetitions'])]
+            results_df = None
+
+            for df in filter(lambda d: isinstance(d, pd.DataFrame), results_dfs):
+                if results_df is None:
+                    results_df = df
+                else:
+                    results_df = pd.concat([results_df, df])
+
+            return results_df
 
     @classmethod
     def __plot_experiment_results(cls, config_file, experiment_selectors=None, experiment_filter=''):
