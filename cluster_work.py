@@ -26,6 +26,7 @@ from copy import deepcopy
 import fnmatch
 from typing import Generator, Tuple, List
 
+import numpy as np
 import pandas as pd
 import yaml
 import logging
@@ -68,6 +69,7 @@ _logger.addHandler(_logging_err_handler)
 # _logger.addHandler(_info_content_output_handler)
 _logger.addHandler(_info_border_output_handler)
 _logger.propagate = False
+
 
 def deep_update(d, u):
     for k, v in u.items():
@@ -116,6 +118,21 @@ def insert_deep_dictionary(d: collections.MutableMapping, t: tuple, value):
             insert_deep_dictionary(d[t[0]], t[1:], value)
     else:
         d[t] = value
+
+
+def format_time(time_in_secs: float):
+    _hours = int(time_in_secs) // 60 ** 2
+    _minutes = (int(time_in_secs) // 60) % 60
+    _seconds = time_in_secs % 60
+
+    time_str = ""
+    if _hours:
+        time_str += "{:d}h:".format(_hours)
+    if _minutes or _hours:
+        time_str += "{:d}m:".format(_minutes)
+    time_str += "{:.2f}s".format(_seconds)
+
+    return time_str
 
 
 class ClusterWork(object):
@@ -449,101 +466,110 @@ class ClusterWork(object):
 
         @work.init
         def _work_init():
-            """initializes the work, i.e., loads the configuration file, compiles the configuration documents from
+            """Initializes the work, i.e., loads the configuration file, compiles the configuration documents from
             the file and the default configurations, expands grid and list experiments, and creates the directory
-            structure.
+            structure. Creates a work item for each repetition of each experiment and emits these work items.
 
-            :return: a job_stream.inline.Multiple object with one configuration document for each experiment.
+
+            :return: a job_stream.inline.Multiple object with one configuration document for each repetition.
             """
             _logger.debug("[rank {}] [{}] parsing arguments and initializing experiments".format(
                 job_stream.inline.getRank(), socket.gethostname()))
 
             options = cls._parser.parse_args()
-            work_list = cls.__init_experiments(config_file=options.config, experiments=options.experiments,
-                                               delete_old=options.delete,
-                                               ignore_config_for_skip=options.skip_ignore_config,
-                                               overwrite_old=options.overwrite)
+            exp_list = cls.__init_experiments(config_file=options.config, experiments=options.experiments,
+                                              delete_old=options.delete,
+                                              ignore_config_for_skip=options.skip_ignore_config,
+                                              overwrite_old=options.overwrite)
+
+            if _logger.isEnabledFor(logging.DEBUG):
+                _logger.debug("[rank {}] [{}] emitting the following initial work:".format(
+                    job_stream.inline.getRank(), socket.gethostname()))
+
+            work_list = []
+            for exp_config in exp_list:
+                _logger.debug("     - <{}>".format(exp_config['name']))
+                _logger.debug("       creating {} repetitions...".format(exp_config['repetitions']))
+                exp_work = [job_stream.inline.Args(config=exp_config, r=i) for i in range(exp_config['repetitions'])]
+                work_list.extend(exp_work)
+
             return job_stream.inline.Multiple(work_list)
 
-        @work.frame
-        def _start_experiment(store, config):
-            """starts an experiment frame for each experiment. Inside the frame one job is started for each repetition.
-
-            :param store: object to store results
-            :param config: the configuration document for the experiment
-            """
-            _logger.info("[rank {}] [{}] creating work for <{}>".format(job_stream.inline.getRank(),
-                                                                        socket.gethostname(),
-                                                                        config['name']))
-            _logger.debug("[rank {}] [{}] cpuCount: {}, hostCpuCount: {}".format(job_stream.common.getRank(),
-                                                                                socket.gethostname(),
-                                                                                job_stream.common.getCpuCount(),
-                                                                                job_stream.common.getHostCpuCount()))
-
-            if not hasattr(store, 'index'):
-                store.index = pd.MultiIndex.from_product([range(config['repetitions']), range(config['iterations'])])
-                store.index.set_names(['r', 'i'], inplace=True)
-                store.config = config
-                # create work list
-                work_list = [job_stream.inline.Args(config, i) for i in range(config['repetitions'])]
-
-                return job_stream.inline.Multiple(work_list)
-
         @work.job
-        def _run_repetition(exp_config, r):
-            """runs a single repetition of the experiment by calling run_rep(exp_config, r) on the instance of
+        def _run_repetition(config, r):
+            """Runs a single repetition of the experiment by calling run_rep(exp_config, r) on the instance of
             ClusterWork.
 
-            :param exp_config: the configuration document for the experiment
+            :param config: the configuration document for the experiment
             :param r: the repetition number
             """
             _logger.debug('[rank {}] [{}] starting <{}> - Rep {}'.format(job_stream.getRank(),
-                                                                        socket.gethostname(),
-                                                                        exp_config['name'], r+1))
+                                                                         socket.gethostname(),
+                                                                         config['name'], r + 1))
 
-            repetition_results = cls().__init_rep(exp_config, r).__run_rep(exp_config, r)
+            repetition_results = cls().__init_rep(config, r).__run_rep(config, r)
             gc.collect()
 
-            return repetition_results
+            _logger.debug('[rank {}] [{}] finished <{}> - Rep {}'.format(job_stream.getRank(),
+                                                                         socket.gethostname(),
+                                                                         config['name'], r + 1))
 
-        @work.frameEnd
-        def _end_experiment(store, repetition_results):
-            """collects the results from the individual repetitions in a pandas.DataFrame.
+            # return repetition_results
+            return config, r, repetition_results
 
-            :param store: the store object from the frame.
-            :param repetition_results: the pandas.DataFrame with the results of the repetition.
-            """
-            _logger.info("[rank {}] [{}] storing results of <{}> - Rep {}".format(job_stream.inline.getRank(),
-                                                                                  socket.gethostname(),
-                                                                                  store.config['name'],
-                                                                                  repetition_results.index[0][0]+1))
+        @work.reduce
+        def _repetition_results(store, inputs, others):
+            """Collects the results of the repetitions and stores them in the respective pandas.DataFrame."""
+            _logger.debug("[rank {}] [{}] reducing results".format(job_stream.inline.getRank(),
+                                                                  socket.gethostname()))
+            # Initialize the data store if it hasn't been.
+            if not hasattr(store, 'exp_results'):
+                _logger.debug("[rank {}] [{}] initializing store".format(job_stream.inline.getRank(),
+                                                                        socket.gethostname()))
+                store.exp_results = dict()
+                store.exp_configs = dict()
 
-            if repetition_results is None:
-                return
+            for other in others:
+                _logger.debug("[rank {}] [{}] merging results".format(job_stream.inline.getRank(),
+                                                                     socket.gethostname()))
+                for exp_name, results in other.exp_results.items():
+                    if exp_name in store.exp_results:
+                        store.exp_results[exp_name].update(results)
+                    else:
+                        store.exp_results[exp_name] = results
+                        store.exp_configs[exp_name] = other.exp_configs[exp_name]
 
-            if not hasattr(store, 'results'):
-                store.results = pd.DataFrame(index=store.index, columns=repetition_results.columns)
+            for exp_config, r, rep_results in inputs:
+                _logger.debug("[rank {}] [{}] adding results from <{}> - Rep {}".format(job_stream.inline.getRank(),
+                                                                                       socket.gethostname(),
+                                                                                       exp_config['name'], r + 1))
+                if exp_config['name'] not in store.exp_results:
+                    index = pd.MultiIndex.from_product([range(exp_config['repetitions']),
+                                                        range(exp_config['iterations'])])
+                    index.set_names(['r', 'i'], inplace=True)
+                    store.exp_results[exp_config['name']] = pd.DataFrame(index=index, columns=rep_results.columns)
+                    store.exp_configs[exp_config['name']] = exp_config
 
-            store.results.update(repetition_results)
+                store.exp_results[exp_config['name']].update(rep_results)
 
         @work.result()
         def _work_results(store):
-            """takes the resulting store object and writes the pandas.DataFrame to a file results.csv in the
-            experiment folder.
+            """Saves the pandas.DataFrames holding the experiment results to disk. The results of each
+            experiment are stored in an individual results.csv in the experiment folder.
 
             :param store: the store object emitted from the frame.
             """
-            _logger.info("[rank {}] [{}] saving results of <{}> to disk".format(job_stream.inline.getRank(),
-                                                                                socket.gethostname(),
-                                                                                store.config['name']))
+            _logger.info("[rank {}] [{}] saving results to disk".format(job_stream.inline.getRank(),
+                                                                        socket.gethostname()))
 
-            if hasattr(store, 'results'):
-                with open(os.path.join(store.config['path'], 'results.csv'), 'w') as results_file:
-                    store.results.to_csv(results_file, **cls._pandas_to_csv_options)
+            if hasattr(store, 'exp_results'):
+                for exp_name, results in store.exp_results.items():
+                    exp_config = store.exp_configs[exp_name]
+                    with open(os.path.join(exp_config['path'], 'results.csv'), 'w') as results_file:
+                        results.to_csv(results_file, **cls._pandas_to_csv_options)
             else:
-                _logger.warning("[rank {}] [{}] no results available for <{}>".format(job_stream.inline.getRank(),
-                                                                                      socket.gethostname(),
-                                                                                      store.config['name']))
+                _logger.warning("[rank {}] [{}] no results available".format(job_stream.inline.getRank(),
+                                                                             socket.gethostname()))
 
     @classmethod
     def init_from_config(cls, config, rep=0, it=0):
@@ -615,6 +641,7 @@ class ClusterWork(object):
                 _logger.debug('[rank {}] Work has been setup...'.format(job_stream.getRank()))
 
                 # w.run()
+            _logger.debug('[rank {}] Have left work context...'.format(job_stream.getRank()))
         else:
             _logger.info("starting {} with the following options:".format(cls.__name__))
             for option, value in vars(options).items():
@@ -641,14 +668,9 @@ class ClusterWork(object):
                     # _logger.log(DIR_OUT, '----------------------------------------------------')
                     result = cls().__init_rep(*repetition).__run_rep(*repetition)
                     _elapsed_time = time.perf_counter() - time_start
-                    _elapsed_hours = int(_elapsed_time) // 60 ** 2
-                    _elapsed_minutes = (int(_elapsed_time) // 60) % 60
-                    _elapsed_seconds = _elapsed_time % 60
                     _logger.log(INFO_BORDER, '////////////////////////////////////////////////////')
                     _logger.log(INFO_CONTNT, '>  Finished Repetition {}'.format(repetition[1] + 1))
-                    _logger.log(INFO_CONTNT, '>  Elapsed time: {:d}h:{:d}m:{:.2f}s'.format(_elapsed_hours,
-                                                                                           _elapsed_minutes,
-                                                                                           _elapsed_seconds))
+                    _logger.log(INFO_CONTNT, '>  Elapsed time: {}'.format(format_time(_elapsed_time)))
                     # _logger.log(DIR_OUT, '////////////////////////////////////////////////////')
                     results[repetition[1]] = result
                     gc.collect()
@@ -706,12 +728,13 @@ class ClusterWork(object):
             # set start for iterations and restore state in subclass
             self.start_iteration = n_finished_its
             try:
-                self._log_path_it = os.path.join(config['log_path'], '{:02d}'.format(rep), '{:02d}'.format(n_finished_its - 1), '')
+                self._log_path_it = os.path.join(config['log_path'], '{:02d}'.format(rep),
+                                                 '{:02d}'.format(n_finished_its - 1), '')
                 if self.restore_state(config, rep, self.start_iteration - 1):
                     _logger.info('Restoring iteration succeeded. Restarting after iteration {}.'.format(n_finished_its))
                     self.__results = pd.DataFrame(data=results,
                                                   index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
-                                                                                 names=['r', 'i']),
+                                                                                   names=['r', 'i']),
                                                   columns=results.columns, dtype=float)
                 else:
                     _logger.info('Restoring iteration NOT successful. Restarting from iteration 1.')
@@ -749,6 +772,10 @@ class ClusterWork(object):
         if self.__completed:
             return self.__results
 
+        repetition_time = .0
+        if self.start_iteration > 0:
+            repetition_time = self.__results.repetition_time.loc[(rep, self.start_iteration - 1)]
+
         for it in range(self.start_iteration, config['iterations']):
             self._it = it
             self._seed = self._seed_base + 1000 * rep + it
@@ -757,14 +784,21 @@ class ClusterWork(object):
             self._log_path_it = os.path.join(config['log_path'], '{:02d}'.format(rep), '{:02d}'.format(it), '')
 
             # run iteration and get results
+            iteration_time = None
             try:
                 time_start = time.perf_counter()
                 _logger.log(INFO_BORDER, '----------------------------------------------------')
                 _logger.log(INFO_CONTNT, '>  Starting Iteration {} of Repetition {}'.format(it + 1, rep + 1))
                 _logger.log(INFO_BORDER, '----------------------------------------------------')
                 it_result = self.iterate(config, rep, it)
+                iteration_time = time.perf_counter() - time_start
+                repetition_time += iteration_time
 
                 flat_it_result = flatten_dict(it_result)
+                if 'iteration_time' not in flat_it_result:
+                    flat_it_result['iteration_time'] = iteration_time
+                if 'repetition_time' not in flat_it_result:
+                    flat_it_result['repetition_time'] = repetition_time
 
                 if self.__results is None:
                     self.__results = pd.DataFrame(index=pd.MultiIndex.from_product([[rep], range(config['iterations'])],
@@ -781,7 +815,8 @@ class ClusterWork(object):
                                                      **self._pandas_to_csv_options)
 
                 self.save_state(config, rep, it)
-            except ValueError or OverflowError or ZeroDivisionError or ArithmeticError or FloatingPointError:
+            except ValueError or OverflowError or ZeroDivisionError or ArithmeticError or FloatingPointError or \
+                   np.linalg.linalg.LinAlgError:
                 _logger.error('Experiment {} - Repetition {} - Iteration {}'.format(config['name'], rep + 1, it + 1),
                               exc_info=True)
                 self.finalize()
@@ -790,11 +825,12 @@ class ClusterWork(object):
                 self.finalize()
                 raise
             finally:
-                _elapsed_time = time.perf_counter() - time_start
+                if iteration_time is None:
+                    iteration_time = time.perf_counter() - time_start
                 _logger.log(INFO_BORDER, '----------------------------------------------------')
                 _logger.log(INFO_CONTNT, '>  Finished Iteration {} of Repetition {}'.format(it + 1, rep + 1))
-                _elapsed_minutes, _elapsed_seconds = int(_elapsed_time) // 60, _elapsed_time % 60
-                _logger.log(INFO_CONTNT, '>  Elapsed time: {:d}m:{:.2f}s'.format(_elapsed_minutes, _elapsed_seconds))
+                _logger.log(INFO_CONTNT, '>  Iteration time: {}'.format(format_time(iteration_time)))
+                _logger.log(INFO_CONTNT, '>  Repetition time: {}'.format(format_time(repetition_time)))
                 # _logger.log(DIR_OUT, '----------------------------------------------------')
 
         self.finalize()
@@ -856,7 +892,7 @@ class ClusterWork(object):
                     bar += "#" * round(25 * p)
                     bar += " " * (25 - round(25 * p))
                     bar += "]"
-                    print('    |- {:2d} {:5.1f}% {:27}'.format(i+1, p * 100, bar))
+                    print('    |- {:2d} {:5.1f}% {:27}'.format(i + 1, p * 100, bar))
                 print()
         print()
 

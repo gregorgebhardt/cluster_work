@@ -3,6 +3,8 @@
 A framework to easily deploy experiments on an computing cluster with mpi. 
 **ClusterWork** is based on the [Python Experiment Suite](https://github.com/rueckstiess/expsuite) by Thomas Rückstiess and uses the [job_stream](https://wwoods.github.io/job_stream/) package to distribute the work.
 
+The **PlotWork** extension for [IPython](https://ipython.org/) allows for easy visualization of of experiment results during run time or after the experiment has finished using [Jupyter](https://jupyter.org/).
+
 ## Installation
 
 0. Creating a virtual environment with [virtualenv](https://virtualenv.pypa.io/en/stable/) or [conda](https://conda.io/miniconda.html) is recommended. For the installation this virtual environment has to be activated first.
@@ -191,10 +193,13 @@ python YOUR_SCRIPT.py YOUR_CONFIG.yml [arguments]
 The following arguments are available:
 
 + `-c, --cluster` runs the experiments using the job_stream scheduler. By default the experiments are executed sequentially in a loop.
-+ `-d, --delete` delete old results before running your experiments
-+ `-e, --experiments [experiments]` chooses the experiments that should run, by default all experiments will run.
++ `-d, --delete` delete old results before running your experiments.
++ `-o, --overwrite` overwrite results if configuration has changed.
++ `-e, --experiments [EXPERIMENTS]` chooses the experiments that should run, by default all experiments will run.
 + `-v, --verbose` shows more output
 + `-p, --progress` displays only the progress of running or finished experiments.
++ `-P, --full_progress` displays the detailed (i.e., of each repetition) progress of running or finished experiments.
++ `-l, --log_level [LEVEL]` displays the detailed (i.e., of each repetition) progress of running or finished experiments.
 
 #### Hostfile for OpenMPI
 
@@ -202,6 +207,14 @@ Depending on the configuration of your cluster, `job_stream` might not know abou
 
 ```sh
 job_stream --hostfile HOSTFILE -- python YOUR_SCRIPT.py YOUR_CONFIG.yml [arguments]
+```
+
+The hostfile should have the following form:
+
+```text
+host0
+host1 cpus=2
+host2 cpus=3
 ```
 
 For a SLURM-based cluster, this hostfile can be created by

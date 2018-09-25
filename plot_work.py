@@ -16,7 +16,7 @@ from IPython.core.getipython import get_ipython
 from IPython.display import display, clear_output
 from IPython.core.magic import register_line_magic
 from IPython.core.magic_arguments import magic_arguments, argument, parse_argstring
-from ipywidgets import Accordion, FloatProgress, Box, HBox, Label, Layout, Output, Widget
+from ipywidgets import Accordion, Tab, FloatProgress, Box, HBox, Label, Layout, Output, Widget, HTML
 
 from typing import Callable, Union, List
 from matplotlib.figure import Figure
@@ -112,25 +112,30 @@ def plot_iteration(line: str):
     args = parse_argstring(plot_iteration, line)
 
     items = []
+    import matplotlib as mpl
+
+    from ipywidgets.widgets.interaction import show_inline_matplotlib_plots
 
     for exp in get_ipython().user_ns['experiment_instances']:
-        fw = __iteration_plot_functions[args.plotter_name](exp, args.args)
-        clear_output()
-        if isinstance(fw, Figure):
-            out = Output(fw)
-            items.append(out)
-            with out:
-                clear_output(wait=True)
-                display(fw)
-        else:
-            items.append(fw)
+        out = Output()
+        items.append(out)
+        with out:
+            # clear_output(wait=True)
+            figs = __iteration_plot_functions[args.plotter_name](exp, args.args)
+            show_inline_matplotlib_plots()
+            # for f in figs:
+            #     display(HTML(f._repr_html_()))
+            # display(fw)
+        # else:
+        # items.append(fw)
 
-    accordion = Accordion(children=items)
-    for i, exp in enumerate(__experiments):
-        accordion.set_title(i, exp['name'])
-    display(accordion)
-
-    # return items
+    if len(items) > 1:
+        tabs = Tab(children=items)
+        for i, exp in enumerate(__experiments):
+            tabs.set_title(i, '...' + exp['name'][-15:])
+        display(tabs)
+    else:
+        return items[0]
 
 
 def __plot_iteration_completer(ipython, event):
