@@ -807,14 +807,15 @@ class ClusterWork(object):
 
                 self.__results.loc[(rep, it)] = flat_it_result
 
+                # save state before results, so that we know the saved state can be restored if we find the results.
+                self.save_state(config, rep, it)
+
                 # write first line with header
                 if it == 0:
                     self.__results.iloc[[it]].to_csv(log_filename, mode='w', header=True, **self._pandas_to_csv_options)
                 else:
                     self.__results.iloc[[it]].to_csv(log_filename, mode='a', header=False,
                                                      **self._pandas_to_csv_options)
-
-                self.save_state(config, rep, it)
             except ValueError or OverflowError or ZeroDivisionError or ArithmeticError or FloatingPointError or \
                    np.linalg.linalg.LinAlgError:
                 _logger.error('Experiment {} - Repetition {} - Iteration {}'.format(config['name'], rep + 1, it + 1),
