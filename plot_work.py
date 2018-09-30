@@ -10,21 +10,19 @@ plotting function:
     * config, results
 
 """
-from cluster_work import ClusterWork
+import os
+from typing import Callable, List, Union
 
-from IPython.core.getipython import get_ipython
-from IPython.display import display, clear_output
-from IPython.core.magic import register_line_magic
-from IPython.core.magic_arguments import magic_arguments, argument, parse_argstring
-from ipywidgets import Accordion, Tab, FloatProgress, Box, HBox, Label, Layout, Output, Widget, HTML
-
-from typing import Callable, Union, List
-from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
+from IPython.core.getipython import get_ipython
+from IPython.core.magic import register_line_magic
+from IPython.core.magic_arguments import argument, magic_arguments, parse_argstring
+from IPython.display import display
+from ipywidgets import Box, FloatProgress, HBox, Label, Layout, Output, Tab, Widget
+from matplotlib.figure import Figure
 from pandas import DataFrame
 
-import os
-
+from cluster_work import ClusterWork
 
 __iteration_plot_functions = {}
 __results_plot_functions = {}
@@ -81,7 +79,7 @@ def load_experiment(line: str):
             __experiments = __experiment_class.load_experiments(f, __experiment_selectors)
 
         if args.filter is not None:
-            __experiments = list(filter(lambda c: all([f in c['name'] for f in args.filter]), __experiments))
+            __experiments = list(filter(lambda c: all([_f in c['name'] for _f in args.filter]), __experiments))
         else:
             __experiments = __experiments
 
@@ -94,13 +92,18 @@ def load_experiment(line: str):
 @argument('-i', '--iteration', type=int, help='the iteration to plot', default=0)
 def restore_experiment_state(line: str):
     args = parse_argstring(restore_experiment_state, line)
-    instances = list()
+    global __instances, __instantiated_experiments
+    __instances = list()
+    __instantiated_experiments = list()
 
     with Output():
         for exp in get_ipython().user_ns['experiments']:
-            instances.append(__experiment_class.init_from_config(exp, args.repetition, args.iteration))
+            exp_instance = __experiment_class.init_from_config(exp, args.repetition, args.iteration)
+            if exp_instance:
+                __instances.append(exp_instance)
+                __instantiated_experiments.append(exp)
 
-    get_ipython().user_ns['experiment_instances'] = instances
+    get_ipython().user_ns['experiment_instances'] = __instances
 
 
 @register_line_magic
@@ -112,33 +115,31 @@ def plot_iteration(line: str):
     args = parse_argstring(plot_iteration, line)
 
     items = []
-    import matplotlib as mpl
 
     from ipywidgets.widgets.interaction import show_inline_matplotlib_plots
 
-    for exp in get_ipython().user_ns['experiment_instances']:
+    global __instances, __instantiated_experiments
+    for exp in __instances:
         out = Output()
         items.append(out)
         with out:
             # clear_output(wait=True)
-            figs = __iteration_plot_functions[args.plotter_name](exp, args.args)
+            __iteration_plot_functions[args.plotter_name](exp, args.args)
             show_inline_matplotlib_plots()
-            # for f in figs:
-            #     display(HTML(f._repr_html_()))
-            # display(fw)
-        # else:
-        # items.append(fw)
 
     if len(items) > 1:
         tabs = Tab(children=items)
-        for i, exp in enumerate(__experiments):
+        for i, exp in enumerate(__instantiated_experiments):
             tabs.set_title(i, '...' + exp['name'][-15:])
-        display(tabs)
-    else:
+        display((tabs,))
+    elif len(items) == 1:
         return items[0]
+    else:
+        import warnings
+        warnings.warn('No plots available for {} with args {}'.format(args.plotter_name, args.args))
 
 
-def __plot_iteration_completer(ipython, event):
+def __plot_iteration_completer(_ipython, _event):
     return __iteration_plot_functions.keys()
 
 
@@ -150,8 +151,6 @@ def __plot_iteration_completer(ipython, event):
 def plot_results(line: str):
     args = parse_argstring(plot_results, line)
 
-    items = []
-
     # global __experiments, __results_plot_functions
     config_results = [(config, ClusterWork.load_experiment_results(config)) for config in __experiments]
     config_results = list(map(lambda t: (t[0], t[1][args.column]), filter(lambda t: t[1] is not None, config_results)))
@@ -160,7 +159,7 @@ def plot_results(line: str):
     if args.individual:
         axes = f.subplots(len(config_results), 1)
     else:
-        axes = [f.subplots(1,1)] * len(config_results)
+        axes = [f.subplots(1, 1)] * len(config_results)
 
     for config_result, ax in zip(config_results, axes):
         config, result = config_result

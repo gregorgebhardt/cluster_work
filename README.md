@@ -1,34 +1,35 @@
 # ClusterWork
 
 A framework to easily deploy experiments on an computing cluster with mpi. 
-**ClusterWork** is based on the [Python Experiment Suite](https://github.com/rueckstiess/expsuite) by Thomas Rückstiess and uses the [job_stream](https://wwoods.github.io/job_stream/) package to distribute the work.
+**ClusterWork** is based on the [Python Experiment Suite](https://github.com/rueckstiess/expsuite) by Thomas Rückstiess and uses the [mpi4py](https://pypi.org/project/mpi4py/) package together with the [cloudpickle](https://github.com/cloudpipe/cloudpickle) package to distribute the work.
 
 The **PlotWork** extension for [IPython](https://ipython.org/) allows for easy visualization of of experiment results during run time or after the experiment has finished using [Jupyter](https://jupyter.org/).
 
 ## Installation
 
-0. Creating a virtual environment with [virtualenv](https://virtualenv.pypa.io/en/stable/) or [conda](https://conda.io/miniconda.html) is recommended. For the installation this virtual environment has to be activated first.
-1. Install required packages
-    1. [job_stream](https://wwoods.github.io/job_stream/) requires [boost](http://www.boost.org/) (filesystem, mpi, python, regex, serialization, system, thread) and mpi (e.g., [OpenMPI](http://www.open-mpi.org/))
-       ```sh
-       sudo apt-get install libboost-dev libopenmpi-dev
-       ```
-       In case, you have created a conda environment, both can also be installed in the environment as
-       ```bash
-       conda install boost mpi4py
-       ```
-       Currently, you need to manually fix a bug in a boost header, see [here](https://github.com/wwoods/job_stream/issues/1). 
-    2. **ClusterWork** requires the Python packages PyYAML, job_stream and pandas
-       ```sh
-       pip install PyYAML job_stream pandas
-       ```
-       However, they should be automatically installed when installying **ClusterWork**
-2. Clone this repository and install it
-```sh
-git clone https://github.com/gregorgebhardt/cluster_work cluster_work
-cd cluster_work
-pip install .
-```
+0. Creating a virtual environment with [virtualenv](https://virtualenv.pypa.io/en/stable/) or [conda](https://conda.io/miniconda.html) is recommended. Create and activate the environment before installing **ClusterWork**:
+    - Create a conda environment and activate it:
+    ```bash
+    conda create -n my_env python=3
+    source activate my_env
+    ```
+    - Or create a virtualenv environment and activate it
+    ```bash
+    virtualenv -p python3 /path/to/my_env
+    source /path/to/my_env/bin/activate
+    ```
+1. Clone **ClusterWork** and install it into the environment
+    ```bash
+    git clone https://github.com/gregorgebhardt/cluster_work.git
+    cd cluster_work
+    pip install -e .
+    ```
+    The `-e` option of pip makes the project editable, i.e., pip will only reference to the git directory and hence changes in the git will be directly available in your environment. If you install without the `-e` option, pip will copy the source to your python packages.
+2. Install required packages for running experiments with MPI
+    The packages required for executing experiments via MPI need to be installed manually
+     ```bash
+     pip install mpi4py cloudpickle
+     ```
 
 ## Get your code on the computing cluster
 Running your code on the computing cluster is now a very simple task. 
@@ -192,7 +193,7 @@ python YOUR_SCRIPT.py YOUR_CONFIG.yml [arguments]
 
 The following arguments are available:
 
-+ `-c, --cluster` runs the experiments using the job_stream scheduler. By default the experiments are executed sequentially in a loop.
++ `-c, --cluster` runs the experiments distributed via MPI. By default the experiments are executed sequentially in a loop.
 + `-d, --delete` delete old results before running your experiments.
 + `-o, --overwrite` overwrite results if configuration has changed.
 + `-e, --experiments [EXPERIMENTS]` chooses the experiments that should run, by default all experiments will run.
@@ -201,27 +202,27 @@ The following arguments are available:
 + `-P, --full_progress` displays the detailed (i.e., of each repetition) progress of running or finished experiments.
 + `-l, --log_level [LEVEL]` displays the detailed (i.e., of each repetition) progress of running or finished experiments.
 
-#### Hostfile for OpenMPI
+#### Running the Experiments with MPI
 
-Depending on the configuration of your cluster, `job_stream` might not know about the available computing units in the cluster. In this case it is possible to pass a hostfile that specifies hostnames and available cpus to job_stream before starting the experiment script.
+To run the experiments via MPI, simply execute the python script via `mpiexec`. Usually, you need to provide a hostfile to `mpiexec` using the option `-hostfile`.
 
-```sh
-job_stream --hostfile HOSTFILE -- python YOUR_SCRIPT.py YOUR_CONFIG.yml [arguments]
+```bash
+mpiexec -hostfile HOSTFILE python -m mpi4py YOUR_SCRIPT.py YOUR_CONFIG.yml [arguments]
 ```
 
 The hostfile should have the following form:
 
 ```text
 host0
-host1 cpus=2
-host2 cpus=3
+host1
+host1
+host1
+host2
+host2
 ```
 
 For a SLURM-based cluster, this hostfile can be created by
 
 ```
 srun hostname > hostfile.$SLURM_JOB_ID
-hostfileconv hostfile.$SLURM_JOB_ID
 ```
-
-where `hostfileconv` is a tool provided by **ClusterWork** that makes sure the hostfile has the right format. In this case the `HOSTFILE` argument for job_stream would be `hostfile.$SLURM_JOB_ID.converted`. 
