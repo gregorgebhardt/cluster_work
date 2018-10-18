@@ -73,7 +73,7 @@ _logger.propagate = False
 
 
 def _sigint_handler(signal, frame):
-    _logger.info('Received SIGINT, will exit program.')
+    _logger.debug('Received SIGINT, will exit program.')
     sys.exit()
 
 
@@ -493,9 +493,9 @@ class ClusterWork(object):
             _rank = _comm.Get_rank()
             _hostname = socket.gethostname()
             _logger.debug('[rank {}] [{}] starting <{}> - Rep {}'.format(_rank, _hostname,
-                                                                         _config['name'], r + 1))
+                                                                         _config['name'], _r + 1))
 
-            repetition_results = cls().__init_rep(config, r).__run_rep(_config, _r)
+            repetition_results = cls().__init_rep(_config, _r).__run_rep(_config, _r)
             gc.collect()
 
             _logger.debug('[rank {}] [{}] finished <{}> - Rep {}'.format(_rank, _hostname,
@@ -527,17 +527,19 @@ class ClusterWork(object):
                     exp_work = [(exp_config, i) for i in range(exp_config['repetitions'])]
                     work_list.extend(exp_work)
 
-                for config, r, rep_results in executor.starmap(_run_repetition, work_list):
-                    _logger.debug("[rank {}] [{}] adding results from <{}> - Rep {}".format(rank, hostname,
-                                                                                            config['name'], r + 1))
+                results = executor.starmap(_run_repetition, work_list)
 
-                    if config['name'] not in exp_results:
-                        index = pd.MultiIndex.from_product([range(config['repetitions']),
-                                                            range(config['iterations'])])
+                for _config, _r, _rep_results in results:
+                    _logger.debug("[rank {}] [{}] adding results from <{}> - Rep {}".format(rank, hostname,
+                                                                                            _config['name'], _r + 1))
+
+                    if _config['name'] not in exp_results:
+                        index = pd.MultiIndex.from_product([range(_config['repetitions']),
+                                                            range(_config['iterations'])])
                         index.set_names(['r', 'i'], inplace=True)
-                        exp_results[config['name']] = pd.DataFrame(index=index, columns=rep_results.columns)
-                        exp_configs[config['name']] = config
-                    exp_results[config['name']].update(rep_results)
+                        exp_results[_config['name']] = pd.DataFrame(index=index, columns=_rep_results.columns)
+                        exp_configs[_config['name']] = _config
+                    exp_results[_config['name']].update(_rep_results)
 
                 _logger.info("[rank {}] [{}] saving results to disk".format(rank, hostname))
 
