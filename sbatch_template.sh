@@ -24,6 +24,5 @@ source activate your_env
 cd %%experiment_cwd%%
 
 srun hostname > hostfile.$SLURM_JOB_ID
-hostfileconv hostfile.$SLURM_JOB_ID
 
 mpiexec -map-by node -hostfile $SLURM_JOB_ID.hostfile --mca mpi_warn_on_fork 0 --display-allocation --display-map python -m mpi4py %%python_script_name%% -c %%yaml_config%% -d -v

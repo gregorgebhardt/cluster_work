@@ -48,13 +48,27 @@ class MyExperiment(ClusterWork):
     # ...
 
     def reset(self, config=None, rep=0):
-        # run code that sets up your experiment for each repetition here
+        """
+        Run code that sets up repetition rep of  your experiment.
+
+        :param config: a dictionary with the experiment configuration
+        :param rep: the repetition counter
+        """
         pass
 
     def iterate(self, config=None, rep=0, n=0):
-        # run your experiment for iteration n
-        # return results as a dictionary, for each key there will be one column in a results table.
+        """
+        Run iteration n of repetition rep of your experiment.
+
+        :param config: a dictionary with the experiment configuration
+        :param rep: the repetition counter
+        :param n: the iteration counter
+        """
         pass
+        
+        # Return results as a dictionary, for each key there will be one column in a results pandas.DataFrame.
+        # The DataFrame will be stored below the path defined in the experiment config.
+        return {'results': None}
 
 
 # to run the experiments, you simply call run on your derived class
@@ -67,6 +81,8 @@ if __name__ == '__main__':
 **ClusterWork** also implement a restart functionality. Since your results are stored after each iteration, your experiment can be restarted if its execution was interrupted for some reason. To obtain this functionality, you need to implement in addition at least the method `restore_state(self, config: dict, rep: int, n: int)`. Additionally, the method `save_state(self, config: dict, rep: int, n: int)` can be implemented to store additional information the needs to be loaded in the `restore_state` method. Finally, a flag `_restore_supported` must be set to `True`.
 
 ```Python
+from cluster_work import ClusterWork
+
 class MyExperiment(ClusterWork):
     _restore_supported = True
 
@@ -86,6 +102,8 @@ class MyExperiment(ClusterWork):
 The parameters for the experiment can be defined in an YAML-file that is passed as an command-line argument. Inside the derived class, we can define default parameters as a dictionary in the `_default_params` field:
 
 ```Python
+from cluster_work import ClusterWork
+
 class MyExperiment(ClusterWork):
     # ...
 
@@ -117,8 +135,6 @@ The required keys for each experiment are `name`, `repetitions`, `iterations`, a
 name: "DEFAULT"
 repetitions: 20
 iterations: 5
-# this is the path where the results are stored,
-# it can be different from the location of the experiment scripts
 path: "path/to/experiment/folder"
 
 params:
@@ -136,6 +152,14 @@ name: "more_steps"
 params:
     num_steps: 50
 ```
+
+The `path` defines the director where the results are stored. This path can be different from the location of the
+experiment scripts **ClusterWork** will create a directory with the experiment `name` below this path in which it stores
+the specific experiment configuration (with the missing values from the default parameters and for one set of parameters
+from the list/grid feature, see below).
+In a sub-folder `log`, **ClusterWork** will store the logged output and the results for each repetition and iteration.
+If you want to get the path to the experiment folder or the log folder use the fields `self._path`, `self._log_path`,
+and `self._log_path_rep`.
 
 #### The list feature
 
