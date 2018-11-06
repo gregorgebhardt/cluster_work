@@ -241,7 +241,7 @@ def plot_results(line: str):
 
         for config_result, ax in zip(selected_config_results, axes):
             config, result = config_result
-            ax.set_xlim(0, config['iterations'])
+            # ax.set_xlim(0, config['iterations'])
             ax.set_title('Results')
             ax.set_xlabel('iterations')
             ax.set_ylabel(args.column)
