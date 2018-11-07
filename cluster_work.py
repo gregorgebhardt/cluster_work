@@ -144,6 +144,16 @@ def format_time(time_in_secs: float):
     return time_str
 
 
+def shorten_param(_param_name):
+    name_parts = _param_name.split('.')
+    shortened_parts = '.'.join(map(lambda s: s[0], name_parts[:-1]))
+    shortened_leaf = '_'.join(map(lambda s: s[0], name_parts[-1].split('_')))
+    if shortened_parts:
+        return shortened_parts + '.' + shortened_leaf
+    else:
+        return shortened_leaf
+
+
 class ClusterWork(object):
     # change this in subclass, if you support restoring state on iteration level
     _restore_supported = False
@@ -394,8 +404,11 @@ class ClusterWork(object):
                     _config = deepcopy(config)
                     del _config[key]
 
-                    _converted_name = '_'.join("{}{}".format(k, v) for k, v in zip(_param_names, values))
-                    _converted_name = re.sub("[' \[\],()]", '', _converted_name)
+                    _converted_name = '_'.join("{}{}".format(shorten_param(k), v) for k, v in zip(_param_names, values))
+                    # _converted_name = re.sub("[' \[\],()]", '', _converted_name)
+                    _converted_name = re.sub("[' ]", '', _converted_name)
+                    _converted_name = re.sub("[(]", '[', _converted_name)
+                    _converted_name = re.sub("[)]", ']', _converted_name)
                     _config['_experiment_path'] = config['path']
                     _config['path'] = os.path.join(config['path'], _converted_name)
                     _config['experiment_name'] = _config['name']
