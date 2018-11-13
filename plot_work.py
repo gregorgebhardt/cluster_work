@@ -339,7 +339,7 @@ def provide_files(line: str):
     elif len(items) == 1:
         return items[0]
     else:
-        warnings.warn('No plots available for {} with args {}'.format(args.plotter_name, args.args))
+        warnings.warn('No files loaded')
 
 
 @register_line_magic
