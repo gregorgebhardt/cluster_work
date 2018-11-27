@@ -918,6 +918,8 @@ class ClusterWork(object):
 
             # run iteration and get results
             iteration_time = None
+            mean_iteration_time = None
+            expected_total_time = None
             time_start = time.perf_counter()
             try:
                 _logger.log(INFO_BORDER, '----------------------------------------------------')
@@ -927,6 +929,9 @@ class ClusterWork(object):
                 it_result = self.iterate(config, rep, it)
                 iteration_time = time.perf_counter() - time_start
                 repetition_time += iteration_time
+                mean_iteration_time = repetition_time / (it + 1)
+                expected_total_time = mean_iteration_time * self._iterations
+
 
                 if it_result is None:
                     continue
@@ -967,8 +972,10 @@ class ClusterWork(object):
                 _logger.log(INFO_BORDER, '----------------------------------------------------')
                 _logger.log(INFO_CONTNT, '>  Finished Iteration {}/{} of Repetition {}/{}'.format(
                     it + 1, self._iterations, rep + 1, self._repetitions))
-                _logger.log(INFO_CONTNT, '>  Iteration time: {}'.format(format_time(iteration_time)))
-                _logger.log(INFO_CONTNT, '>  Repetition time: {}'.format(format_time(repetition_time)))
+                _logger.log(INFO_CONTNT, '>  Iteration time: {} [{}]'.format(format_time(iteration_time),
+                                                                             format_time(mean_iteration_time)))
+                _logger.log(INFO_CONTNT, '>  Repetition time: {} [{}]'.format(format_time(repetition_time),
+                                                                              format_time(expected_total_time)))
 
         self.finalize()
         self.__completed = True
