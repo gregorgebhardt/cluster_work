@@ -997,7 +997,7 @@ class ClusterWork(object):
 
         return self
 
-    ExperimentProgress = collections.namedtuple('ExperimentProgress', ['exp_name', 'name', 'num_iterations',
+    ExperimentProgress = collections.namedtuple('ExperimentProgress', ['name', 'num_iterations',
                                                                        'num_repetitions',
                                                                        'exp_progress', 'rep_progress',
                                                                        'finished_repetitions', 'finished_iterations'])
@@ -1011,7 +1011,7 @@ class ClusterWork(object):
         for config in experiments_config:
             exp_progress, rep_progress, finished_repetitions, finished_iterations = cls.__experiment_progress(config)
             total_progress += exp_progress / len(experiments_config)
-            experiment_progress.append(ClusterWork.ExperimentProgress(config['experiment_name'], config['name'],
+            experiment_progress.append(ClusterWork.ExperimentProgress(config['name'],
                                                                       config['iterations'],
                                                                       config['repetitions'], exp_progress,
                                                                       rep_progress, finished_repetitions,
