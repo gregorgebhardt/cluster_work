@@ -190,6 +190,9 @@ class ClusterWork(object):
                          help='Runs the experiments with mpi support.')
     _parser.add_argument('-g', '--mpi_groups', nargs='?', type=int,
                          help='The number of MPI groups to create.')
+    _parser.add_argument('-j', '--job', nargs='+', type=int, default=None,
+                         help='Run only the specified job from the created work (can be used with slurm arrays).'
+                              'Note that each repetition counts as a single job.')
     _parser.add_argument('-d', '--delete', action='store_true',
                          help='CAUTION deletes results of previous runs.')
     _parser.add_argument('-o', '--overwrite', action='store_true',
@@ -518,7 +521,7 @@ class ClusterWork(object):
         return run_experiments
 
     @classmethod
-    def __run_mpi(cls, mpi_groups=0):
+    def __run_mpi(cls, mpi_groups, job_idx=None):
         from mpi4py.futures import MPICommExecutor
 
         cls.__num_mpi_groups = mpi_groups
@@ -611,15 +614,32 @@ class ClusterWork(object):
                             # _logger.error('Repetition has to be in range [0, {}]'.format(num_repetitions))
                             raise InvalidParameterArgument(
                                 'Repetition has to be in range [0, {}]'.format(exp_config['repetitions']))
-                        _logger.debug("     - <{}>".format(exp_config['name']))
-                        _logger.debug("       repetition {}".format(options.repetition + 1))
+                        _logger.info("     - <{}>".format(exp_config['name']))
+                        _logger.info("       repetition {}".format(options.repetition + 1))
                         work_list = [(exp_config, options.repetition)]
                     else:
                         for exp_config in exp_list:
-                            _logger.debug("     - <{}>".format(exp_config['name']))
-                            _logger.debug("       creating {} repetitions...".format(exp_config['repetitions']))
-                            exp_work = [(exp_config, i) for i in range(exp_config['repetitions'])]
+                            _logger.info("     - <{}>".format(exp_config['name']))
+                            _logger.info("       creating {} repetitions...".format(exp_config['repetitions']))
+                            exp_work = [(exp_config, rep) for rep in range(exp_config['repetitions'])]
                             work_list.extend(exp_work)
+
+                    if job_idx is not None:
+                        if isinstance(job_idx, int):
+                            idx = job_idx
+                        elif isinstance(job_idx, list):
+                            if len(job_idx) == 1:
+                                idx = job_idx[0]
+                            else:
+                                idx = slice(*job_idx)
+                        else:
+                            raise NotImplementedError('could not process job_idx of type {}'.format(type(job_idx)))
+                        work_list = work_list[idx]
+                        if not isinstance(work_list, list):
+                            work_list = [work_list]
+                        _logger.info('Selecting the following jobs to be executed:')
+                        for (conf, r) in work_list:
+                            _logger.info(' - {}: Repetition {}'.format(conf['name'], r))
 
                     executor_results = executor.starmap(_run_repetition, work_list)
 
@@ -744,7 +764,7 @@ class ClusterWork(object):
                 for option, value in vars(options).items():
                     _logger.info("  - {}: {}".format(option, value))
 
-            cls.__run_mpi(options.mpi_groups)
+            cls.__run_mpi(mpi_groups=options.mpi_groups, job_idx=options.job)
         else:
             _logger.info("starting {} with the following options:".format(cls.__name__))
             for option, value in vars(options).items():
