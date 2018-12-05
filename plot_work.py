@@ -36,7 +36,8 @@ __file_provider_functions = {}
 __experiment_class: ClusterWork = None
 __experiment_config = None
 __experiment_selectors = None
-__instantiated_experiments = None
+__instances = []
+__instantiated_experiments = []
 
 
 def register_iteration_plot_function(name: str):
@@ -111,8 +112,8 @@ def load_experiment(line: str):
 def restore_experiment_state(line: str):
     args = parse_argstring(restore_experiment_state, line)
     global __instances, __instantiated_experiments
-    __instances = list()
-    __instantiated_experiments = list()
+    __instances.clear()
+    __instantiated_experiments.clear()
 
     with Output():
         for exp in get_ipython().user_ns['experiments']:
@@ -130,14 +131,15 @@ def restore_experiment_state(line: str):
 def restore_best_experiment_state(line: str):
     args = parse_argstring(restore_best_experiment_state, line)
     global __instances, __instantiated_experiments, __experiments
-    __instances = list()
-    __instantiated_experiments = list()
+    __instances.clear()
+    __instantiated_experiments.clear()
 
     experiment_results = [ClusterWork.load_experiment_results(exp) for exp in __experiments]
     best_results_idx = []
 
-    with Output():
-        for exp, result in zip(__experiments, experiment_results):
+    # with Output():
+    for exp, result in zip(__experiments, experiment_results):
+        if result is not None:
             result_column = result[args.column]
             r, i = result_column.idxmax()
             best_results_idx.append((r, i))
@@ -148,6 +150,27 @@ def restore_best_experiment_state(line: str):
 
     get_ipython().user_ns['best_results_idx'] = best_results_idx
     get_ipython().user_ns['experiment_instances'] = __instances
+
+
+@register_line_magic
+@magic_arguments()
+@argument('column')
+def print_best_iterations(line: str):
+    args = parse_argstring(restore_best_experiment_state, line)
+
+    experiment_results = [ClusterWork.load_experiment_results(exp) for exp in __experiments]
+    best_results_idx = {}
+
+    for exp, result in zip(__experiments, experiment_results):
+        if result is not None:
+            result_column = result[args.column]
+            r, i = result_column.idxmax()
+            val = result_column.loc[(r, i)]
+            best_results_idx[exp['name']] = (r, i, val)
+
+    get_ipython().user_ns['best_results_idx'] = best_results_idx
+    for k, (r, i, val) in best_results_idx.items():
+        print('- {}: Rep {} It {} --> {}'.format(k, r, i, val))
 
 
 @register_line_magic
@@ -218,7 +241,7 @@ def __plot_iteration_completer(_ipython, _event):
 @register_line_magic
 @magic_arguments()
 @argument('plotter_name', type=str, help='the name of the plotter function')
-@argument('column', type=str, help='column of the results DataFrame to plot')
+@argument('column', type=str, nargs='*', help='column of the results DataFrame to plot')
 @argument('--save_figures', action='store_true', help='store the figures to files')
 @argument('--prefix', type=str, help='add a prefix to the filename', default='')
 @argument('--format', type=str, help='format to store the figure in', default=None)
@@ -397,19 +420,82 @@ def line_style_cycle(axes: Axes):
         return _line_style_cycles[axes]
 
 
-@register_results_plot_function('mean_2std')
-def plot_mean_2std(name: str, results_df: Series, axes: Axes):
-    mean = results_df.groupby(level=1).mean()
-    std = results_df.groupby(level=1).std()
+def _plot_one_column(axes, column, name, plot_each_rep=False, ls_def=None):
+    mean = column.groupby(level=1).mean()
+    std = column.groupby(level=1).std()
+    if ls_def is None:
+        ls_name = next(line_style_cycle(axes))
+        ls_def = _line_styles[ls_name]
 
-    ls_name = next(line_style_cycle(axes))
-    ls_def = _line_styles[ls_name]
+    if plot_each_rep:
+        axes.plot(mean.index, column.unstack(level=0), c='grey', ls=ls_def, alpha=.5)
 
-    axes.plot(mean.index, results_df.unstack(level=0), c='grey', ls=ls_def, alpha=.5)
-
-    axes.fill_between(mean.index, mean - 2 * std, mean + 2 * std, alpha=.5)
+    axes.fill_between(mean.index, mean - 2 * std, mean + 2 * std, alpha=.35)
     axes.plot(mean.index, mean, label=name, ls=ls_def)
     axes.legend()
+
+
+@register_results_plot_function('mean_2std')
+def plot_mean_2std(name: str, results_df: Union[Series, DataFrame], axes: Axes, plot_each_rep=False):
+
+    if isinstance(results_df, DataFrame):
+        for col in results_df:
+            _plot_one_column(axes, results_df[col], name + ', ' + col, plot_each_rep)
+    else:
+        _plot_one_column(axes, results_df, name, plot_each_rep)
+
+
+register_results_plot_function('mean_2std_reps')(lambda n, df, a: plot_mean_2std(n, df, a, True))
+
+
+@register_results_plot_function('mean_2std_best')
+def plot_mean_2std_best(name: str, results_df: Union[Series, DataFrame], axes: Axes, plot_outliers=False):
+    n_best = 4
+
+    if isinstance(results_df, DataFrame):
+        for col in results_df:
+            # search maximum values in each repetition
+            max_val = results_df[col].groupby(level=0).max()
+            # sort maximum values in descending order
+            sorted_val = max_val.sort_values(ascending=False)
+            # take the first n_best maximum values
+            best_val = sorted_val.head(n_best)
+            worst_val = sorted_val.tail(len(sorted_val) - n_best)
+            # select repetitions based on index in best_val
+            selected_repetitions = results_df[col].loc[best_val.index.tolist()]
+            outlier_repetitions = results_df[col].loc[worst_val.index.tolist()]
+
+            ls_name = next(line_style_cycle(axes))
+            ls_def = _line_styles[ls_name]
+
+            if plot_outliers:
+                unstacked_outliers = outlier_repetitions.unstack(level=0)
+                axes.plot(unstacked_outliers.index, unstacked_outliers, c='grey', ls=ls_def, alpha=.5)
+
+            _plot_one_column(axes, selected_repetitions, name + ', ' + col, ls_def=ls_def)
+    else:
+        # search maximum values in each repetition
+        max_val = results_df.groupby(level=0).max()
+        # sort maximum values in descending order
+        sorted_val = max_val.sort_values(ascending=False)
+        # take the first n_best maximum values
+        best_val = sorted_val.head(n_best)
+        worst_val = sorted_val.tail(len(sorted_val) - n_best)
+        # select repetitions based on index in best_val
+        selected_repetitions = results_df.loc[best_val.index.tolist()]
+        outlier_repetitions = results_df.loc[worst_val.index.tolist()]
+
+        ls_name = next(line_style_cycle(axes))
+        ls_def = _line_styles[ls_name]
+
+        if plot_outliers:
+            unstacked_outliers = outlier_repetitions.unstack(level=0)
+            axes.plot(unstacked_outliers.index, unstacked_outliers, c='grey', ls=ls_def)
+
+        _plot_one_column(axes, selected_repetitions, name, ls_def=ls_def)
+
+
+register_results_plot_function('mean_2std_best_out')(lambda n, df, a: plot_mean_2std_best(n, df, a, True))
 
 
 del register_line_magic
