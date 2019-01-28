@@ -778,10 +778,10 @@ class ClusterWork(object):
                 _logger.warning('DEPRECATED option -c/--cluster is deprecated, use -m/-mpi instead.')
 
             try:
-                import mpi4py
+                from mpi4py import MPI as _MPI
                 import cloudpickle
                 global MPI
-                MPI = mpi4py.MPI
+                MPI = _MPI
                 MPI.pickle.__init__(cloudpickle.dumps, cloudpickle.loads)
             except ModuleNotFoundError:
                 _logger.error('ClusterWork requires the mpi4py and cloudpickle packages for distributing jobs via MPI.')

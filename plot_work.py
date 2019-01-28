@@ -26,6 +26,7 @@ from ipywidgets import Box, FloatProgress, HBox, Label, Layout, Output, Tab, VBo
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from pandas import DataFrame, Series
+import numpy as np
 
 from cluster_work import ClusterWork
 
@@ -285,6 +286,33 @@ def plot_results(line: str):
                 f.savefig(filename, format=args.format)
 
 
+@register_line_magic
+@magic_arguments()
+@argument('column', type=str, nargs='*', help='column of the results DataFrame to plot')
+def print_results(line: str):
+    args = parse_argstring(print_results, line)
+
+    # global __experiments, __results_plot_functions
+    config_results = [(config, ClusterWork.load_experiment_results(config)) for config in __experiments]
+    config_results = list(map(lambda t: (t[0], t[1][args.column]), filter(lambda t: t[1] is not None, config_results)))
+
+    ret = []
+
+    global __experiment_selectors
+    for selector in __experiment_selectors:
+        selected_config_results = list(filter(lambda t: t[0]['name'].startswith(selector), config_results))
+
+        df = DataFrame(columns=['m', 's'])
+
+        for config_result in selected_config_results:
+            config, result = config_result
+            df.loc[config['name']] = result.mean()[0], result.std()[0]
+
+        ret.append(df)
+
+    return tuple(ret)
+
+
 def __create_exp_progress_box(name, exp_progress, rep_progress, show_full_progress=False):
     exp_progress_layout = Layout(display='flex', flex_flow='column', align_items='stretch', width='100%')
     exp_progress_bar = HBox([FloatProgress(value=exp_progress, min=.0, max=1., bar_style='info'), Label(name)])
@@ -450,7 +478,7 @@ register_results_plot_function('mean_2std_reps')(lambda n, df, a: plot_mean_2std
 
 @register_results_plot_function('mean_2std_best')
 def plot_mean_2std_best(name: str, results_df: Union[Series, DataFrame], axes: Axes, plot_outliers=False):
-    n_best = 4
+    n_best = 7
 
     if isinstance(results_df, DataFrame):
         for col in results_df:
@@ -496,6 +524,11 @@ def plot_mean_2std_best(name: str, results_df: Union[Series, DataFrame], axes: A
 
 
 register_results_plot_function('mean_2std_best_out')(lambda n, df, a: plot_mean_2std_best(n, df, a, True))
+
+
+@register_results_plot_function('mean_grid_results')
+def plot_mean_grid_results(name: str, results_df: Union[Series, DataFrame], axes: Axes, plot_outliers=False):
+    pass
 
 
 del register_line_magic
