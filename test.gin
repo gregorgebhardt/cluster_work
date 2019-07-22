@@ -1,0 +1,3 @@
+#cluster_work.Grid.param_dict = {'test_function.a': [1, 2],
+#                                'test_function.b': ['a', 'b']}
+cluster_work.List.param_dict = {'test_function.c': ['x', 'y']}
