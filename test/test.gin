@@ -1,3 +1,9 @@
 #cluster_work.Grid.param_dict = {'test_function.a': [1, 2],
 #                                'test_function.b': ['a', 'b']}
 cluster_work.List.param_dict = {'test_function.c': ['x', 'y']}
+
+cluster_work.name = 'test'
+cluster_work.iterations = 10
+cluster_work.repetitions = 2
+cluster_work.path = 'test_path'
+#cluster_work.log_path = 'test_log_path'

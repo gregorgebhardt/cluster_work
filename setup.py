@@ -61,5 +61,5 @@ setup(
 
     py_modules=['cluster_work', 'plot_work'],
 
-    install_requires=['PyYAML', 'numpy', 'pandas', 'matplotlib', 'ipython', 'ipywidgets'],
+    install_requires=['PyYAML', 'numpy', 'pandas', 'matplotlib', 'ipython', 'ipywidgets', 'gin'],
 )
