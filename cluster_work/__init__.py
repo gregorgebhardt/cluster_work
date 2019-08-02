@@ -14,4 +14,6 @@
 
 from ._cluster_work import ClusterWork
 from ._parameter_iterator import ParameterList, ParameterGrid
+from ._experiment import ExperimentOptions, Experiment, ExperimentCollection
+from ._results import RepetitionResults
 

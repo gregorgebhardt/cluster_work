@@ -1,0 +1,7 @@
+cluster_work.name = 'test'
+cluster_work.iterations = 10
+cluster_work.repetitions = 2
+cluster_work.path = 'test_path'
+
+List.param_dict = {'Model.a': ['a', 'b'], 'Model.b': ['1', '2']}
+#Grid.param_dict = {'Model.a': ['x', 'y'], 'Model.b': ['1', '2']}

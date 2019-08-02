@@ -1,3 +1,4 @@
+import collections
 import re
 
 
@@ -14,6 +15,10 @@ def format_time(time_in_secs: float):
     time_str += "{:05.2f}s".format(_seconds)
 
     return time_str
+
+
+def format_counter(counter: int) -> int:
+    return counter + 1
 
 
 def de_camelcase_underscore(string: str):

@@ -50,27 +50,61 @@ logging.basicConfig(level=logging.INFO, handlers=[_logging_filtered_std_handler,
                                                   _logging_err_handler])
 
 # get logger for cluster_work package
-_logger = logging.getLogger('cluster_work')
-_logger.addHandler(_logging_filtered_std_handler)
-_logger.addHandler(_logging_err_handler)
+cw_logger = logging.getLogger('cluster_work')
+cw_logger.addHandler(_logging_filtered_std_handler)
+cw_logger.addHandler(_logging_err_handler)
 # _logger.addHandler(_info_content_output_handler)
-_logger.addHandler(_info_border_output_handler)
-_logger.propagate = False
+cw_logger.addHandler(_info_border_output_handler)
+cw_logger.propagate = False
 
 
 @gin.configurable('logging', module='cluster_work')
 def init_logging(log_level=logging.INFO, cw_log_level=logging.INFO):
     logging.root.setLevel(log_level)
-    _logger.setLevel(cw_log_level)
+    cw_logger.setLevel(cw_log_level)
     _logging_filtered_std_handler.setLevel(level=log_level)
+
+
+def log_repetition_to_file(filename, append=False):
+    # set logging handlers for current repetition
+    file_handler_mode = 'a' if append else 'w'
+    file_handler = logging.FileHandler(filename, file_handler_mode)
+    file_handler.setLevel(logging.root.level)
+    file_handler.setFormatter(_logging_formatter)
+
+    # if self.__run_with_mpi and MPI.COMM_WORLD.size > 1:
+    #     logging.root.handlers.clear()
+    #     _logger.handlers.clear()
+    #     if MPI.COMM_WORLD.rank == 0 and self.__num_mpi_groups == 1:
+    #         # if we run just one group, rank 0 can output to stdout
+    #         logging.root.handlers = [file_handler,
+    #                                  _logging_filtered_std_handler,
+    #                                  _logging_err_handler]
+    #         cw_logger.handlers = [file_handler,
+    #                               _logging_filtered_std_handler,
+    #                               _logging_err_handler,
+    #                               _info_border_output_handler]
+    #     elif self._COMM.rank == 0:
+    #         logging.root.handlers = [file_handler, _logging_err_handler]
+    #         cw_logger.handlers = [file_handler,
+    #                               _logging_filtered_std_handler,
+    #                               _logging_err_handler,
+    #                               _info_content_output_handler]
+    #     else:
+    #         logging.root.addHandler(_logging_err_handler)
+    #         cw_logger.addHandler(_logging_err_handler)
+    # else:
+    logging.root.handlers.clear()
+    logging.root.handlers = [file_handler, _logging_filtered_std_handler, _logging_err_handler]
+    cw_logger.addHandler(file_handler)
 
 
 def log_info_message(message: str, border_start_char=None, border_end_char=None):
     if border_start_char:
-        _logger.log(INFO_BORDER, border_start_char * 52)
-    _logger.log(INFO_CONTNT, '>  ' + message)
+        cw_logger.log(INFO_BORDER, border_start_char * 52)
+    cw_logger.log(INFO_CONTNT, '>  ' + message)
     if border_end_char:
-        _logger.log(INFO_BORDER, border_end_char * 52)
+        cw_logger.log(INFO_BORDER, border_end_char * 52)
 
 
 class StreamLogger:

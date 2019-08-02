@@ -24,11 +24,11 @@ class ParameterIterator:
         return iter([dict()])
 
 
-@gin.configurable(module='cluster_work')
+@gin.configurable(module='cluster_work', name_or_fn='List')
 class ParameterList(ParameterIterator):
     _iterator_func = zip
 
 
-@gin.configurable(module='cluster_work')
+@gin.configurable(module='cluster_work', name_or_fn='Grid')
 class ParameterGrid(ParameterIterator):
     _iterator_func = itertools.product
