@@ -59,7 +59,7 @@ cw_logger.propagate = False
 
 
 @gin.configurable('logging', module='cluster_work')
-def init_logging(log_level=logging.INFO, cw_log_level=logging.INFO):
+def init_logging(log_level='INFO', cw_log_level='INFO'):
     logging.root.setLevel(log_level)
     cw_logger.setLevel(cw_log_level)
     _logging_filtered_std_handler.setLevel(level=log_level)

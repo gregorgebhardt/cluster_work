@@ -9,7 +9,7 @@ import gin
 import numpy as np
 
 from ._experiment import Experiment, ExperimentCollection
-from ._logging import log_info_message, cw_logger, log_repetition_to_file
+from ._logging import log_info_message, cw_logger, log_repetition_to_file, init_logging
 from ._results import RepetitionResults
 from ._time import Timer
 from ._tools import format_counter, format_time
@@ -28,8 +28,14 @@ from ._tools import format_counter, format_time
 # signal.signal(signal.SIGINT, _sigint_handler)
 # signal.signal(signal.SIGTERM, _sigint_handler)
 
+class ClusterWorkMeta(abc.ABCMeta):
+    def __call__(cls, experiment: Experiment, rep: int, *args, **kwargs):
+        cw_obj = ClusterWork.__new__(cls, experiment=experiment, rep=rep, *args, **kwargs)
+        cw_obj.__init__(*args, **kwargs)
+        return cw_obj
 
-class ClusterWork(abc.ABC):
+
+class ClusterWork(metaclass=ClusterWorkMeta):
     # change this in subclass, if you support restoring state on iteration level
     restore_supported = False
     # _pandas_to_csv_options = dict(na_rep='NaN', sep='\t', float_format="%+.8e")
@@ -66,18 +72,16 @@ class ClusterWork(abc.ABC):
     # __run_with_mpi = False
 
     # idea: maybe we could use this to add MPI functionality?
-    def __init_subclass__(cls, **kwargs):
-        super(ClusterWork, cls).__init_subclass__(**kwargs)
-
-        if '__init__' in cls.__dict__:
-            init_fn = cls.__init__
-            cls.__init__ = lambda a, *args, **kw_args: init_fn(a)
+    # def __init_subclass__(cls, **kwargs):
+    #     super(ClusterWork, cls).__init_subclass__(**kwargs)
 
     def __new__(cls, experiment: Experiment, rep: int, *args, **kwargs):
         self = super().__new__(cls, *args, **kwargs)
         self.__rep: int = rep
         self.__experiment = experiment
-        self.__results: RepetitionResults = RepetitionResults(rep, experiment.iterations, experiment.path)
+        self.__results: RepetitionResults = RepetitionResults(repetition=rep,
+                                                              iterations=experiment.iterations,
+                                                              path=experiment.path)
         self.__timer = Timer()
 
         return self
@@ -104,6 +108,10 @@ class ClusterWork(abc.ABC):
     @property
     def results(self) -> RepetitionResults:
         return self.__results
+
+    @property
+    def log_path_rep(self):
+        return os.path.join(self.experiment.log_path, 'rep_{:02d}'.format(self.__rep), '')
 
     ######
 
@@ -330,6 +338,8 @@ class ClusterWork(abc.ABC):
 
         # idea: add default gin config?
         gin.parse_config_file(arguments.gin_file)
+
+        init_logging()
 
         cls._RESTART_FULL_REPETITIONS = arguments.restart_full_repetitions
 

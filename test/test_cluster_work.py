@@ -11,7 +11,7 @@ class TestClusterWork(ClusterWork):
     def reset(self) -> None:
         self.model = Model()
 
-    def iterate(self, iteration: int) -> None:
+    def iterate(self) -> None:
         print('iterate')
         res_a, res_b = self.model()
         self.results.store(model_1=res_a, model_2=res_b)

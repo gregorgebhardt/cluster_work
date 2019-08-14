@@ -61,7 +61,7 @@ class AbstractResults(abc.ABC):
 
 
 class RepetitionResults(AbstractResults):
-    def __init__(self, repetition, iterations, filename=None, **kwargs):
+    def __init__(self, *, repetition, iterations, filename=None, **kwargs):
         self._repetition = repetition
         self._iterations = iterations
         self._it = 0
