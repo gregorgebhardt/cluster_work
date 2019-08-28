@@ -71,6 +71,8 @@ class ClusterWork(metaclass=ClusterWorkMeta):
 
     # __run_with_mpi = False
 
+    CATCH_EXCEPTIONS = (ValueError, ArithmeticError, np.linalg.linalg.LinAlgError)
+
     # idea: maybe we could use this to add MPI functionality?
     # def __init_subclass__(cls, **kwargs):
     #     super(ClusterWork, cls).__init_subclass__(**kwargs)
@@ -500,21 +502,15 @@ class ClusterWork(metaclass=ClusterWorkMeta):
                 # save state before results, so that we know the saved state can be restored if we find the results.
                 self.save_state(it)
 
-            except ValueError or ArithmeticError or np.linalg.linalg.LinAlgError:
+            except self.CATCH_EXCEPTIONS:
                 cw_logger.error('Experiment {} - Repetition {} - Iteration {}'.format(self.experiment.name,
                                                                                       format_counter(self.rep),
                                                                                       format_counter(it)),
                                 exc_info=True)
-                self.finalize()
                 return
-            except Exception:
-                self.finalize()
-                raise
             finally:
-                if self.__timer.measured_time is None:
-                    with self.__timer:
-                        # if no iteration has been measured, create a fake measurement for printing
-                        pass
+                self.finalize()
+
                 log_info_message('Finished Iteration {}/{} of Repetition {}/{}'.format(
                     format_counter(it), self.experiment.iterations,
                     format_counter(self.rep), self.experiment.repetitions), border_start_char='-')
@@ -523,31 +519,6 @@ class ClusterWork(metaclass=ClusterWorkMeta):
                 log_info_message('Repetition time: {} [{}]'.format(format_time(self.__timer.total_time),
                                                                    format_time(self.__timer.expected_total_time(
                                                                        self.experiment.iterations - it))))
-
-        self.finalize()
-
-    # def __init_rep_without_checks(self, config, rep):
-    #     # set configuration of this repetition
-    #     self._name = config['name']
-    #     self._repetitions = config['repetitions']
-    #     self._iterations = config['iterations']
-    #     self._path = config['path']
-    #     self._log_path = config['log_path']
-    #     self.log_path_rep = os.path.join(config['log_path'], 'rep_{:02d}'.format(rep), '')
-    #     self._plotting = config['plotting'] if 'plotting' in config else True
-    #     self._no_gui = (not config['gui'] if 'gui' in config else False) or self.__run_with_mpi
-    #     self._seed_base = zlib.adler32(self._name.encode()) % int(1e6)
-    #     self._seed = self._seed_base + 1000 * rep
-    #     if self.__run_with_mpi and self._COMM.name != 'MPI_COMM_SELF':
-    #         self._seed += int(1e5 * self._COMM.rank)
-    #
-    #     # set params of this repetition
-    #     self._params = config['params']
-    #     self._rep = rep
-    #
-    #     self.reset(config, rep)
-    #
-    #     return self
 
     def _repetition_has_completed(self) -> (bool, int):
         if self.results.empty:
